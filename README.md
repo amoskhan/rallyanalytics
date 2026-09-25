@@ -1,4 +1,4 @@
-# RallyBook
+# Rally Analytics
 
 Badminton scoring and video analysis.
 

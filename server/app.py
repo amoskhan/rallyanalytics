@@ -1,4 +1,4 @@
-"""RallyBook local server: upload videos, run the analysis on the GPU, serve results.
+"""Rally Analytics local server: upload videos, run the analysis on the GPU, serve results.
 
 Run from the repo root:  .venv\\Scripts\\python -m uvicorn server.app:app --port 8765
 Then open http://localhost:8765/video.html
@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from .pipeline import job, shuttle
 
-app = FastAPI(title="RallyBook")
+app = FastAPI(title="Rally Analytics")
 
 
 @app.on_event("startup")

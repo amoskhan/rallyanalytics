@@ -1,4 +1,4 @@
-# One-time setup for RallyBook video analysis (Windows, NVIDIA GPU).
+# One-time setup for Rally Analytics video analysis (Windows, NVIDIA GPU).
 # Run from the rallybook folder:  powershell -ExecutionPolicy Bypass -File setup.ps1
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -27,4 +27,4 @@ if (-not (Test-Path "$ckpt\TrackNet_best.pt")) {
 & $py -c "import os; os.chdir('models'); from ultralytics import YOLO; YOLO('yolo26m-pose.pt')"
 
 & $py -c "import torch; print('CUDA available:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
-Write-Host "Setup complete. Double-click start.bat to run RallyBook."
+Write-Host "Setup complete. Double-click start.bat to run Rally Analytics."
