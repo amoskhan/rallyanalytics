@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>RallyBook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#edf1ed; --surface:#fbfcfa; --surface-2:#e2e9e3; --ink:#13201a; --muted:#56675e; --line:#cdd8d0;
+  --court:#2e7a57; --court-line:#f4f7f2; --a:#1d5ea6; --a-soft:#dce7f4; --b:#b8325c; --b-soft:#f5dfe7;
+  --cork:#c98a1e; --good:#2e7a57;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0e1512; --surface:#16211c; --surface-2:#1e2b25; --ink:#e4ece7; --muted:#93a59b; --line:#2b3b34;
+    --court:#1f5a40; --court-line:#dfe8e2; --a:#7cb0f0; --a-soft:#1a2c42; --b:#ef83a3; --b-soft:#3b1e2a;
+    --cork:#e2ad4f; --good:#5fc093;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0e1512; --surface:#16211c; --surface-2:#1e2b25; --ink:#e4ece7; --muted:#93a59b; --line:#2b3b34;
+  --court:#1f5a40; --court-line:#dfe8e2; --a:#7cb0f0; --a-soft:#1a2c42; --b:#ef83a3; --b-soft:#3b1e2a;
+  --cork:#e2ad4f; --good:#5fc093;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:0 48px}
+.wrap{max-width:1100px;margin:0 auto}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:14px 10px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:.01em;margin:0;line-height:1}
+.brand small{display:block;font-size:12px;color:var(--muted);letter-spacing:.02em}
+nav.tabs{display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:10px}
+nav.tabs button{border:0;background:none;padding:6px 14px;border-radius:7px;font-weight:500;font-size:14px;color:var(--muted)}
+nav.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12)}
+
+.sample{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:14px;padding:10px 14px;border:1px dashed var(--cork);border-radius:10px;font-size:14px}
+.sample b{color:var(--cork)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;margin-top:18px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+.meta{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.meta .g{font-family:var(--display);font-size:20px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.meta .r{font-size:13px;color:var(--muted)}
+.pill{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:99px;background:var(--surface-2);color:var(--ink)}
+.pill.hot{background:var(--cork);color:#1b1305}
+.pill.done{background:var(--good);color:#fff}
+
+.board{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.team{border:0;border-radius:14px;padding:14px 16px 16px;text-align:left;display:flex;flex-direction:column;gap:4px;min-height:190px;transition:transform .08s ease}
+.team.t0{background:var(--a-soft)} .team.t1{background:var(--b-soft)}
+.team:active:not(:disabled){transform:scale(.985)}
+.team:disabled{cursor:default;opacity:.85}
+.team .row1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tname{font-weight:600;font-size:15px;overflow-wrap:anywhere}
+.dots{display:flex;gap:4px}
+.dots i{width:10px;height:10px;border-radius:50%;border:2px solid currentColor;opacity:.55}
+.dots i.on{background:currentColor;opacity:1}
+.t0 .dots,.t0 .big{color:var(--a)} .t1 .dots,.t1 .big{color:var(--b)}
+.big{font-family:var(--display);font-weight:700;font-size:clamp(76px,16vw,120px);line-height:.9;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.srv{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;min-height:20px}
+.srv.on{color:var(--ink);font-weight:500}
+.srv svg{width:16px;height:16px;flex:none}
+.tap{font-size:12px;color:var(--muted);margin-top:auto}
+
+.history{display:flex;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.history span b{color:var(--ink);font-weight:600}
+.notice{padding:10px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--line);font-size:14px}
+.notice strong{font-weight:600}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.panel h2,.panel h3{font-family:var(--display);font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:15px;margin:0 0 10px;color:var(--muted)}
+.hint{font-size:13px;color:var(--muted);margin:0 0 10px}
+.tagrow{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.tagrow:last-child{margin-bottom:0}
+.tagrow label{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--bg);padding:5px 11px;border-radius:99px;font-size:13px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--surface);padding:8px 14px;border-radius:9px;font-weight:500;font-size:14px}
+.btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:default}
+.kbd{font-size:12px;color:var(--muted)}
+
+.court{width:100%;height:auto;display:block}
+.court .mat{fill:var(--court)}
+.court .cl{stroke:var(--court-line);stroke-width:5;fill:none}
+.court .net{stroke:var(--court-line);stroke-width:9;stroke-dasharray:4 6}
+.court .hl-a{fill:var(--a);opacity:.55}
+.court .hl-b{fill:var(--b);opacity:.55}
+.court .dot{stroke:var(--court-line);stroke-width:5}
+.court .dot.a{fill:var(--a)} .court .dot.b{fill:var(--b)} .court .dot.ghost{opacity:.5}
+.court .lbl{fill:var(--court-line);font:600 36px var(--body);text-anchor:middle}
+.court .path{stroke:var(--cork);stroke-width:7;stroke-dasharray:18 12;fill:none}
+.court .dim{fill:var(--muted);font:500 30px var(--body);text-anchor:middle}
+.court .dimline{stroke:var(--muted);stroke-width:3}
+.caption{font-size:13px;color:var(--muted);margin:8px 0 0}
+
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.log li{display:grid;grid-template-columns:44px 64px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;align-items:baseline}
+.log li:last-child{border-bottom:0}
+.log .g{color:var(--muted);font-size:12px}
+.log .s{font-weight:600;font-variant-numeric:tabular-nums}
+.log .w0{color:var(--a)} .log .w1{color:var(--b)}
+.log .d{min-width:0;overflow-wrap:anywhere}
+.log .d small{color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;margin:0}
+
+/* setup */
+.setup{max-width:560px}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.field > span{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.field input,.field select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:480px){.pair{grid-template-columns:1fr}}
+.seg{display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:9px;width:max-content;max-width:100%;flex-wrap:wrap}
+.seg button{border:0;background:none;padding:6px 12px;border-radius:6px;font-size:14px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12)}
+.warn{font-size:13px;color:var(--muted)}
+
+/* analysis */
+.filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:18px}
+.filters .sp{flex:1}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}
+@media (max-width:720px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.tile .k{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.tile .v{font-family:var(--display);font-size:32px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;display:flex;gap:8px;align-items:baseline}
+.tile .v .x{font-size:18px;color:var(--muted);font-weight:500}
+.ca{color:var(--a)} .cb{color:var(--b)}
+.agrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}
+@media (max-width:860px){.agrid{grid-template-columns:1fr}}
+.span2{grid-column:1/-1}
+.insights{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;max-width:75ch}
+.mom{width:100%;height:auto;display:block}
+.mom .fa{fill:var(--a)} .mom .fb{fill:var(--b)}
+.mom .axis{stroke:var(--muted);stroke-width:1}
+.mom .grid{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+.mom .sep{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3}
+.mom text{fill:var(--muted);font:500 11px var(--body)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.tbl-wrap{overflow-x:auto}
+table.t{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+table.t th{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:left;padding:4px 8px 6px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+table.t td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+table.t tr:last-child td{border-bottom:0}
+.cell{display:flex;align-items:center;gap:6px;min-width:70px}
+.cell .bar{height:8px;border-radius:2px;flex:none}
+.bar.a{background:var(--a)} .bar.b{background:var(--b)}
+.split{display:flex;height:12px;border-radius:3px;overflow:hidden;background:var(--surface-2);min-width:120px}
+.split span{display:block;height:100%}
+.sr{display:grid;grid-template-columns:90px 1fr 70px;gap:10px;align-items:center;font-size:13.5px;padding:5px 0}
+.sr .n{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.pct{font-variant-numeric:tabular-nums;font-weight:600}
+
+/* rules */
+.rules{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-top:18px}
+@media (max-width:860px){.rules{grid-template-columns:1fr}}
+.rules h2{color:var(--ink);font-size:18px}
+.rules ul,.rules ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.rules p{margin:0 0 8px;max-width:68ch}
+.rules dl{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;font-size:14px}
+.rules dt{font-weight:600}
+.rules dd{margin:0;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:99px;font-size:14px;z-index:10}
+textarea#csvOut{width:100%;height:140px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;margin-top:10px}
+@media (prefers-reduced-motion:reduce){.team{transition:none}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><path d="M9 22 L4 6 L28 6 L23 22 Z" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M11 22 L8 6 M16 22 V6 M21 22 L24 6" stroke="var(--muted)" stroke-width="1.2"/><ellipse cx="16" cy="25" rx="7" ry="4.5" fill="var(--cork)"/></svg>
+      <div><h1>RallyBook</h1><small>Rally scoring · BWF rules · match analysis</small></div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tab-score" data-tab="score">Score</button>
+      <button role="tab" id="tab-analysis" data-tab="analysis">Analysis</button>
+      <button role="tab" id="tab-rules" data-tab="rules">Rules</button>
+    </nav>
+  </header>
+
+  <div id="sampleBar" class="sample" hidden>
+    <span><b>Sample match.</b> These rallies are made up so you can see the analysis. Start your own when you're courtside.</span>
+    <button class="btn primary" id="sampleNew">Start a new match</button>
+  </div>
+
+  <section id="view-score" hidden></section>
+  <section id="view-setup" hidden></section>
+  <section id="view-analysis" hidden></section>
+  <section id="view-rules" hidden></section>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+const KEY='rallybook-v1', TABKEY='rallybook-tab';
+const OUT={winner:'Winner',forced:'Forced error',unforced:'Unforced error',serve:'Service fault'};
+const SHOT={smash:'Smash',kill:'Net kill',drop:'Drop',net:'Net shot',clear:'Clear',drive:'Drive',lift:'Lift'};
+const SHOT_ALL={...SHOT,serve:'Serve'};
+const LEN={s:'1–4 shots',m:'5–9 shots',l:'10+ shots'};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SHUTTLE='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10 L2 2 H14 L12 10 Z" fill="none" stroke="currentColor" stroke-width="1.3"/><ellipse cx="8" cy="12" rx="3.6" ry="2.6" fill="var(--cork)"/></svg>';
+
+let M=load(), tag={outcome:null,shot:null,len:null}, tab='score', gf='all', setupOpen=false;
+if(!M) M=sampleMatch();
+try{tab=localStorage.getItem(TABKEY)||'score'}catch(e){}
+
+function save(){try{localStorage.setItem(KEY,JSON.stringify(M))}catch(e){}}
+function load(){try{const s=localStorage.getItem(KEY);return s?JSON.parse(s):null}catch(e){return null}}
+
+/* ---------- rules engine ---------- */
+const capOf=p=>p===21?30:p===15?21:15;
+const midOf=p=>Math.ceil(p/2);
+const needOf=cfg=>Math.floor(cfg.bestOf/2)+1;
+function teamName(t){return M.cfg.teams[t].map(esc).join(' / ')}
+function player(t,i){return esc(M.cfg.teams[t][i]||M.cfg.teams[t][0])}
+
+// Replays every rally from the start, so undo is just "drop the last rally".
+function replay(m){
+  const cfg=m.cfg, dbl=cfg.mode==='doubles', need=needOf(cfg), cap=capOf(cfg.points);
+  let gi=0, sc=[0,0], srv=cfg.firstServe, right=[0,0], won=[0,0], over=false, winner=null, midDone=false;
+  const games=[{scores:[0,0],winner:null}], rows=[];
+  for(const r of m.rallies){
+    if(over) break;
+    const court=sc[srv]%2===0?'R':'L';
+    const sp=dbl?(court==='R'?right[srv]:1-right[srv]):0;
+    const row={game:gi,before:[...sc],server:srv,serverPlayer:sp,court,winner:r.winner,outcome:r.outcome||null,shot:r.shot||null,len:r.len||null,events:[]};
+    sc[r.winner]++;
+    if(r.winner===srv){ if(dbl) right[srv]=1-right[srv]; }   // serving side scores: same server, swaps court
+    else srv=r.winner;                                        // receiving side scores: gains serve, nobody moves
+    row.after=[...sc];
+    const hi=Math.max(...sc), w=sc[0]>sc[1]?0:1;
+    const decider=cfg.bestOf>1 && gi===cfg.bestOf-1;
+    if((hi>=cfg.points && Math.abs(sc[0]-sc[1])>=2) || hi===cap){
+      won[w]++; games[gi]={scores:[...sc],winner:w}; row.events.push('game');
+      if(won[w]===need){over=true;winner=w;row.events.push('match')}
+      else{gi++;sc=[0,0];srv=w;right=[0,0];midDone=false;games.push({scores:[0,0],winner:null})}
+    }else{
+      games[gi].scores=[...sc];
+      if(!midDone && hi===midOf(cfg.points)){midDone=true;row.events.push(decider?'interval-ends':'interval')}
+    }
+    rows.push(row);
+  }
+  const court=sc[srv]%2===0?'R':'L';
+  return {game:gi,score:sc,server:srv,serverPlayer:dbl?(court==='R'?right[srv]:1-right[srv]):0,court,right,won,over,winner,games,rows};
+}
+
+function status(st){
+  if(st.over) return {txt:'Match complete',cls:'done'};
+  const p=M.cfg.points, cap=capOf(p), s=st.score, need=needOf(M.cfg);
+  if(s[0]===s[1] && s[0]===cap-1) return {txt:'Golden point · next rally wins',cls:'hot'};
+  if(s[0]===s[1] && s[0]>=p-1) return {txt:'Deuce · win by 2',cls:'hot'};
+  for(const t of [0,1]){
+    const n=s[t]+1;
+    if((n>=p && n-s[1-t]>=2)||n===cap) return {txt:(st.won[t]+1===need?'Match point · ':'Game point · ')+teamName(t),cls:'hot'};
+  }
+  return null;
+}
+
+/* ---------- sample match ---------- */
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function pick(R,w){const k=Object.keys(w),tot=k.reduce((s,x)=>s+w[x],0);let r=R()*tot;for(const x of k){if((r-=w[x])<0)return x}return k[0]}
+function sampleMatch(){
+  const R=rng(11), m={cfg:{mode:'singles',teams:[['Jun Hao'],['Marcus']],firstServe:0,points:21,bestOf:3},rallies:[],sample:true};
+  for(let i=0;i<220;i++){
+    const st=replay(m); if(st.over) break;
+    if(R()<0.035){m.rallies.push({winner:1-st.server,outcome:'serve',shot:'serve',len:'s'});continue}
+    const len=pick(R,{s:4,m:4,l:2.2});
+    // Jun Hao attacks well in short rallies; Marcus is steadier in long ones.
+    const pA=0.5+(len==='s'?0.1:len==='l'?-0.16:0.02)+(st.server===0?0.02:-0.02);
+    const w=R()<pA?0:1;
+    const outcome=w===0?pick(R,{winner:5,unforced:2.2,forced:2.5}):pick(R,{winner:3,unforced:3.6,forced:3});
+    let shot;
+    if(outcome==='winner') shot=w===0?pick(R,{smash:5,kill:2.5,drop:1.5,drive:1}):pick(R,{drop:3,net:2.5,smash:2,clear:1.5,drive:1.2});
+    else shot=w===0?pick(R,{net:3,clear:2.5,lift:2,drive:1.5,drop:1}):pick(R,{smash:3.2,net:2,drive:2,drop:1.2,clear:1});
+    const tagged=R()>0.08;
+    m.rallies.push({winner:w,outcome:tagged?outcome:null,shot:tagged?shot:null,len:tagged||R()>0.5?len:null});
+  }
+  return m;
+}
+
+/* ---------- court drawing ---------- */
+function box(t,c,dbl){
+  const top=dbl?0:46, bot=dbl?610:564;
+  const x=t===0?[dbl?76:0,472]:[868,dbl?1264:1340];
+  const lower=(t===0)===(c==='R'); // left team faces right, so its right court is the lower half
+  const y=lower?[305,bot]:[top,305];
+  return {x:x[0],y:y[0],w:x[1]-x[0],h:y[1]-y[0],cx:(x[0]+x[1])/2,cy:(y[0]+y[1])/2};
+}
+function courtSVG(o){
+  const dbl=o.mode==='doubles', vb=o.dims?'-70 -80 1480 780':'-20 -20 1380 650';
+  const L=(a,b,c,d,k='cl')=>`<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" class="${k}"/>`;
+  let s=`<svg viewBox="${vb}" class="court" role="img" aria-label="${esc(o.aria||'Badminton court')}">`;
+  s+=`<rect x="0" y="0" width="1340" height="610" class="mat"/>`;
+  if(o.srv!=null){
+    const b1=box(o.srv,o.court,dbl), b2=box(1-o.srv,o.court,dbl);
+    s+=`<rect x="${b1.x}" y="${b1.y}" width="${b1.w}" height="${b1.h}" class="hl-${o.srv?'b':'a'}"/>`;
+    s+=`<rect x="${b2.x}" y="${b2.y}" width="${b2.w}" height="${b2.h}" class="hl-${o.srv?'a':'b'}"/>`;
+  }
+  s+=`<rect x="0" y="0" width="1340" height="610" class="cl"/>`+L(0,46,1340,46)+L(0,564,1340,564)+L(472,0,472,610)+L(868,0,868,610)+L(76,0,76,610)+L(1264,0,1264,610)+L(0,305,472,305)+L(868,305,1340,305)+L(670,-14,670,624,'net');
+  if(o.srv!=null){
+    const b1=box(o.srv,o.court,dbl), b2=box(1-o.srv,o.court,dbl);
+    const sx=o.srv===0?b1.x+b1.w*0.72:b1.x+b1.w*0.28, rx=o.srv===0?b2.x+b2.w*0.3:b2.x+b2.w*0.7;
+    s+=`<path d="M${sx} ${b1.cy} Q670 305 ${rx} ${b2.cy}" class="path"/>`;
+    const dot=(x,y,t,label,ghost)=>`<circle cx="${x}" cy="${y}" r="26" class="dot ${t?'b':'a'}${ghost?' ghost':''}"/><text x="${x}" y="${y-44}" class="lbl">${label}</text>`;
+    if(dbl){
+      const other=c=>c==='R'?'L':'R';
+      const p1=box(o.srv,other(o.court),true), p2=box(1-o.srv,other(o.court),true);
+      s+=dot(p1.cx,p1.cy,o.srv,o.names.srvPartner,true)+dot(p2.cx,p2.cy,1-o.srv,o.names.rcvPartner,true);
+    }
+    s+=dot(sx,b1.cy,o.srv,o.names.server)+dot(rx,b2.cy,1-o.srv,o.names.receiver);
+  }
+  if(o.dims){
+    const T=(x,y,t,rot)=>`<text x="${x}" y="${y}" class="dim"${rot?` transform="rotate(-90 ${x} ${y})"`:''}>${t}</text>`;
+    s+=L(0,660,1340,660,'dimline')+T(670,700,'13.40 m')+L(-30,0,-30,610,'dimline')+T(-42,305,'6.10 m doubles',1);
+    s+=L(1370,46,1370,564,'dimline')+T(1402,305,'5.18 m singles',1);
+    s+=L(472,-30,670,-30,'dimline')+T(571,-44,'1.98 m')+L(0,-30,76,-30,'dimline')+T(38,-44,'0.76 m');
+    s+=T(1070,-44,'net 1.524 m high at centre');
+  }
+  return s+'</svg>';
+}
+
+/* ---------- rendering ---------- */
+function render(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.tab===tab)));
+  $('#sampleBar').hidden=!M.sample||setupOpen;
+  $('#view-score').hidden=!(tab==='score'&&!setupOpen);
+  $('#view-setup').hidden=!setupOpen;
+  $('#view-analysis').hidden=!(tab==='analysis'&&!setupOpen);
+  $('#view-rules').hidden=tab!=='rules'||setupOpen;
+  if(setupOpen) renderSetup();
+  else if(tab==='score') renderScore();
+  else if(tab==='analysis') renderAnalysis();
+  else renderRules();
+}
+
+function describe(r){
+  const W=teamName(r.winner), Lo=teamName(1-r.winner);
+  if(r.outcome==='winner') return `${r.shot?SHOT_ALL[r.shot]+' winner':'Winner'} <small>by ${W}</small>`;
+  if(r.outcome==='serve') return `Service fault <small>by ${Lo}</small>`;
+  if(r.outcome) return `${OUT[r.outcome]}${r.shot?' on '+SHOT_ALL[r.shot].toLowerCase():''} <small>by ${Lo}</small>`;
+  return `Point <small>to ${W}</small>`;
+}
+
+function renderScore(){
+  const st=replay(M), cfg=M.cfg, dbl=cfg.mode==='doubles', stt=status(st), last=st.rows[st.rows.length-1];
+  const gameCount=cfg.bestOf===1?'one game':'best of 3';
+  let notice='';
+  if(last){
+    const ev=last.events;
+    if(ev.includes('match')){
+      notice=`<strong>${teamName(st.winner)} win${M.cfg.teams[st.winner].length>1?'':'s'} the match</strong> ${st.games.map(g=>g.scores.join('–')).join(', ')}. <a href="#" data-go="analysis">See the analysis</a>.`;
+    }else if(ev.includes('game')){
+      const g=st.games[st.game-1];
+      notice=`<strong>Game ${st.game} to ${teamName(g.winner)}, ${g.scores[g.winner]}–${g.scores[1-g.winner]}.</strong> Change ends. 2-minute break. ${teamName(g.winner)} serve${M.cfg.teams[g.winner].length>1?'':'s'} first.`;
+    }else if(ev.includes('interval-ends')) notice=`<strong>Interval, up to 60 seconds.</strong> Deciding game: players change ends now.`;
+    else if(ev.includes('interval')) notice=`<strong>Interval, up to 60 seconds.</strong> The leading side reached ${midOf(cfg.points)}.`;
+  }
+  const hist=st.games.filter(g=>g.winner!=null).map((g,i)=>`<span>G${i+1} <b class="num">${g.scores[0]}–${g.scores[1]}</b></span>`).join('');
+  const panel=t=>{
+    const on=!st.over&&st.server===t;
+    const need=needOf(cfg);
+    const dots=Array.from({length:need},(_,i)=>`<i class="${i<st.won[t]?'on':''}"></i>`).join('');
+    const who=dbl?player(t,st.serverPlayer)+' serves':'Serving';
+    const line=st.over?(st.winner===t?'Winner':''):on?`${SHUTTLE}${who} · ${st.court==='R'?'right':'left'} court`:'Receiving';
+    return `<button class="team t${t}" data-point="${t}" ${st.over?'disabled':''} aria-label="Point to ${teamName(t)}, now ${st.score[t]}">
+      <span class="row1"><span class="tname">${teamName(t)}</span><span class="dots" title="Games won">${dots}</span></span>
+      <span class="big">${st.score[t]}</span>
+      <span class="srv ${on?'on':''}">${line}</span>
+      ${st.over?'':`<span class="tap">Tap to award the rally · key ${t+1}</span>`}
+    </button>`;
+  };
+  let names=null;
+  if(!st.over){
+    const recv=1-st.server, rp=dbl?(st.court==='R'?st.right[recv]:1-st.right[recv]):0;
+    names={server:player(st.server,st.serverPlayer),receiver:player(recv,rp),srvPartner:dbl?player(st.server,1-st.serverPlayer):'',rcvPartner:dbl?player(recv,1-rp):''};
+  }
+  const chip=(grp,k,label)=>`<button class="chip" data-tag="${grp}" data-val="${k}" aria-pressed="${tag[grp]===k}">${label}</button>`;
+  const recent=st.rows.slice(-12).reverse();
+  $('#view-score').innerHTML=`
+  <div class="grid">
+    <div class="col">
+      <div class="meta">
+        <span><span class="g">${st.over?'Final':`Game ${st.game+1}`}</span> <span class="r">${gameCount} to ${cfg.points} · rally ${st.rows.length+(st.over?0:1)}</span></span>
+        ${stt?`<span class="pill ${stt.cls}">${stt.txt}</span>`:''}
+      </div>
+      <div class="board">${panel(0)}${panel(1)}</div>
+      ${hist?`<div class="history">${hist}</div>`:''}
+      ${notice?`<div class="notice" role="status">${notice}</div>`:''}
+      <div class="panel">
+        <h2>Tag the rally <span style="text-transform:none;letter-spacing:0;font-weight:500">(optional)</span></h2>
+        <p class="hint">Pick tags first, then tap the side that won. Tags feed the Analysis tab.</p>
+        <div class="tagrow"><label>How it ended</label><div class="chips">${Object.entries(OUT).map(([k,v])=>chip('outcome',k,v)).join('')}</div></div>
+        <div class="tagrow"><label>Final shot</label><div class="chips">${Object.entries(SHOT).map(([k,v])=>chip('shot',k,v)).join('')}</div></div>
+        <div class="tagrow"><label>Rally length</label><div class="chips">${Object.entries(LEN).map(([k,v])=>chip('len',k,v)).join('')}</div></div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="undo" ${st.rows.length?'':'disabled'}>Undo last rally</button>
+        <button class="btn" id="newMatch">New match</button>
+        <span class="kbd" style="align-self:center">Keys: 1 / 2 award a rally, U undoes</span>
+      </div>
+    </div>
+    <div class="col">
+      <div class="panel">
+        <h2>Service</h2>
+        ${courtSVG({mode:cfg.mode,srv:st.over?null:st.server,court:st.court,names,aria:st.over?'Court':'Service diagram: '+(names?names.server+' serves to '+names.receiver:'')})}
+        <p class="caption">${st.over?'Match finished.':`${names.server} serves from the ${st.court==='R'?'right':'left'} service court (score ${st.score[st.server]}, ${st.score[st.server]%2?'odd':'even'}) diagonally to ${names.receiver}. The shaded boxes are the ${dbl?'doubles (short and wide)':'singles (long and narrow)'} service courts.`}</p>
+      </div>
+      <div class="panel">
+        <h2>Recent rallies</h2>
+        ${recent.length?`<ol class="log">${recent.map(r=>`<li><span class="g">G${r.game+1}</span><span class="s w${r.winner}">${r.after[0]}–${r.after[1]}</span><span class="d">${describe(r)}${r.len?` <small>· ${LEN[r.len]}</small>`:''}</span></li>`).join('')}</ol>`:'<p class="empty">No rallies yet. Tap a side to award the first point.</p>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderSetup(){
+  const c=M.sample?{mode:'singles',teams:[['',''],['','']],firstServe:0,points:21,bestOf:3}:JSON.parse(JSON.stringify(M.cfg));
+  const f=window._setup||(window._setup={mode:c.mode,points:c.points,bestOf:c.bestOf,firstServe:c.firstServe,names:[[c.teams[0][0]||'',c.teams[0][1]||''],[c.teams[1][0]||'',c.teams[1][1]||'']]});
+  const seg=(key,opts)=>`<div class="seg">${opts.map(([v,l])=>`<button type="button" data-seg="${key}" data-val="${v}" aria-pressed="${String(f[key])===String(v)}">${l}</button>`).join('')}</div>`;
+  const dbl=f.mode==='doubles';
+  const nm=(t,i,ph)=>`<input id="n${t}${i}" data-name="${t}${i}" placeholder="${ph}" value="${esc(f.names[t][i])}" maxlength="24">`;
+  $('#view-setup').innerHTML=`
+  <form class="panel setup" id="setupForm" style="margin-top:18px">
+    <h2 style="color:var(--ink);font-size:20px">New match</h2>
+    <div class="field"><span>Event</span>${seg('mode',[['singles','Singles'],['doubles','Doubles']])}</div>
+    <div class="pair">
+      <div class="field"><span>Side A</span>${nm(0,0,dbl?'Player 1':'Player name')}${dbl?nm(0,1,'Player 2'):''}</div>
+      <div class="field"><span>Side B</span>${nm(1,0,dbl?'Player 1':'Player name')}${dbl?nm(1,1,'Player 2'):''}</div>
+    </div>
+    ${dbl?'<p class="warn" style="margin-top:-6px">List the player who starts in the right service court first on each side.</p>':''}
+    <div class="field"><span>First serve</span>${seg('firstServe',[[0,'Side A'],[1,'Side B']])}</div>
+    <div class="field"><span>Game to</span>${seg('points',[[21,'21 (BWF)'],[15,'15'],[11,'11']])}</div>
+    <div class="field"><span>Format</span>${seg('bestOf',[[3,'Best of 3 games'],[1,'One game']])}</div>
+    <p class="warn">${M.rallies.length&&!M.sample?'Starting replaces the match in progress on this device.':'Scores are saved in this browser only.'}</p>
+    <div class="actions"><button class="btn primary" type="submit">Start match</button><button class="btn" type="button" id="cancelSetup">Cancel</button></div>
+  </form>`;
+}
+
+function stats(rows){
+  const S={n:rows.length,pts:[0,0],how:[{},{}],srv:[[0,0],[0,0]],rcv:[[0,0],[0,0]],run:[0,0],sw:[{},{}],se:[{},{}],len:{s:[0,0],m:[0,0],l:[0,0]},tagged:0};
+  let cur=-1,cnt=0,lg=-1;
+  const inc=(o,k)=>o[k]=(o[k]||0)+1;
+  for(const r of rows){
+    const w=r.winner,l=1-w;
+    S.pts[w]++; inc(S.how[w],r.outcome||'untagged'); if(r.outcome)S.tagged++;
+    S.srv[r.server][1]++; if(w===r.server)S.srv[r.server][0]++;
+    S.rcv[1-r.server][1]++; if(w!==r.server)S.rcv[w][0]++;
+    if(r.game!==lg){cur=-1;cnt=0;lg=r.game}
+    if(w===cur)cnt++;else{cur=w;cnt=1} S.run[w]=Math.max(S.run[w],cnt);
+    if(r.shot){ if(r.outcome==='winner')inc(S.sw[w],r.shot); else if(r.outcome==='forced'||r.outcome==='unforced')inc(S.se[l],r.shot); }
+    if(r.len)S.len[r.len][w]++;
+  }
+  return S;
+}
+const pc=(a,b)=>b?Math.round(a/b*100):0;
+
+function insights(S){
+  const out=[], N=[teamName(0),teamName(1)];
+  if(S.n<8) return ['Play a few more rallies to see patterns.'];
+  const given=t=>(S.how[1-t].unforced||0)+(S.how[1-t].forced||0)+(S.how[1-t].serve||0);
+  const g=[given(0),given(1)], worse=g[0]>=g[1]?0:1;
+  if(S.pts[1-worse]) out.push(`${N[worse]} gave away ${g[worse]} points through errors. That is ${pc(g[worse],S.pts[1-worse])}% of everything ${N[1-worse]} scored.`);
+  const ue=[S.how[1].unforced||0,S.how[0].unforced||0];
+  if(ue[0]+ue[1]>=4) out.push(`Unforced errors: ${N[0]} ${ue[0]}, ${N[1]} ${ue[1]}. ${ue[0]===ue[1]?'Level.':`${N[ue[0]>ue[1]?0:1]} made more. Safer shot choices under no pressure would recover points.`}`);
+  for(const t of [0,1]){
+    const top=Object.entries(S.sw[t]).sort((a,b)=>b[1]-a[1])[0];
+    if(top&&top[1]>=3) out.push(`${N[t]}'s main weapon: the ${SHOT_ALL[top[0]].toLowerCase()}, ${top[1]} winner${top[1]>1?'s':''} out of ${S.how[t].winner||0}.`);
+  }
+  const L=S.len.l, lt=L[0]+L[1];
+  if(lt>=4){const w=L[0]>=L[1]?0:1; out.push(`Long rallies (10+ shots): ${N[w]} won ${L[w]} of ${lt} (${pc(L[w],lt)}%).${pc(L[w],lt)>=60?' Extend rallies against '+N[1-w]+'; shorten them if you are '+N[1-w]+'.':''}`)}
+  const sv=[pc(S.srv[0][0],S.srv[0][1]),pc(S.srv[1][0],S.srv[1][1])];
+  out.push(`Rallies won on own serve: ${N[0]} ${sv[0]}%, ${N[1]} ${sv[1]}%. In rally scoring the receiver often has the edge, so under 50% on serve is normal.`);
+  const rw=S.run[0]>=S.run[1]?0:1;
+  out.push(`Longest run: ${N[rw]}, ${S.run[rw]} points in a row.`);
+  return out;
+}
+
+function momentum(rows){
+  if(!rows.length) return '<p class="empty">No rallies yet.</p>';
+  const W=760,H=200,pl=30,pr=6,pt=12,pb=22,iw=W-pl-pr,ih=H-pt-pb,mid=pt+ih/2;
+  const leads=rows.map(r=>r.after[0]-r.after[1]), mx=Math.max(4,...leads.map(Math.abs)), bw=iw/rows.length;
+  let s=`<svg viewBox="0 0 ${W} ${H}" class="mom" role="img" aria-label="Lead after each rally">`;
+  for(const v of [mx,-mx]){const y=mid-v/mx*(ih/2);s+=`<line x1="${pl}" x2="${W-pr}" y1="${y}" y2="${y}" class="grid"/><text x="${pl-6}" y="${y+4}" text-anchor="end">${v>0?'+':'−'}${Math.abs(v)}</text>`}
+  s+=`<text x="${pl-6}" y="${mid+4}" text-anchor="end">0</text>`;
+  leads.forEach((v,i)=>{if(!v)return;const h=Math.abs(v)/mx*(ih/2);s+=`<rect x="${(pl+i*bw+bw*.12).toFixed(1)}" width="${Math.max(1,bw*.76).toFixed(1)}" y="${(v>0?mid-h:mid).toFixed(1)}" height="${h.toFixed(1)}" class="${v>0?'fa':'fb'}"/>`});
+  s+=`<line x1="${pl}" x2="${W-pr}" y1="${mid}" y2="${mid}" class="axis"/>`;
+  rows.forEach((r,i)=>{
+    if(i===0||r.game!==rows[i-1].game){const x=pl+i*bw; if(i>0)s+=`<line x1="${x}" x2="${x}" y1="${pt}" y2="${H-pb}" class="sep"/>`; s+=`<text x="${x+4}" y="${H-6}">Game ${r.game+1}</text>`}
+  });
+  return s+'</svg>';
+}
+
+function renderAnalysis(){
+  const st=replay(M), gamesPlayed=[...new Set(st.rows.map(r=>r.game))];
+  if(gf!=='all'&&!gamesPlayed.includes(gf)) gf='all';
+  const rows=gf==='all'?st.rows:st.rows.filter(r=>r.game===gf), S=stats(rows), N=[teamName(0),teamName(1)];
+  const fchip=(v,l)=>`<button class="chip" data-gf="${v}" aria-pressed="${gf===v}">${l}</button>`;
+  const two=(a,b,x='')=>`<span class="ca">${a}${x}</span><span class="x">–</span><span class="cb">${b}${x}</span>`;
+  const ue=[S.how[1].unforced||0,S.how[0].unforced||0];
+  // How points were won
+  const hk=[['winner','Own winners'],['unforced','Opp. unforced errors'],['forced','Opp. forced errors'],['serve','Opp. service faults'],['untagged','Untagged']];
+  const hmax=Math.max(1,...[0,1].flatMap(t=>hk.map(([k])=>S.how[t][k]||0)));
+  const cell=(v,t,max)=>`<div class="cell"><span class="bar ${t?'b':'a'}" style="width:${Math.round((v||0)/max*56)}px"></span><span>${v||0}</span></div>`;
+  const howT=`<div class="tbl-wrap"><table class="t"><thead><tr><th>How the point was won</th><th class="ca">${N[0]}</th><th class="cb">${N[1]}</th></tr></thead><tbody>${hk.filter(([k])=>k!=='untagged'||(S.how[0][k]||S.how[1][k])).map(([k,l])=>`<tr><td>${l}</td><td>${cell(S.how[0][k],0,hmax)}</td><td>${cell(S.how[1][k],1,hmax)}</td></tr>`).join('')}<tr><td><b>Total points</b></td><td><b>${S.pts[0]}</b></td><td><b>${S.pts[1]}</b></td></tr></tbody></table></div>`;
+  // Shots
+  const smax=Math.max(1,...[0,1].flatMap(t=>Object.values(S.sw[t]).concat(Object.values(S.se[t]))));
+  const shotRows=Object.keys(SHOT).filter(k=>S.sw[0][k]||S.sw[1][k]||S.se[0][k]||S.se[1][k]);
+  const shotT=shotRows.length?`<div class="tbl-wrap"><table class="t"><thead><tr><th>Shot</th><th class="ca">${N[0]} winners</th><th class="ca">${N[0]} errors</th><th class="cb">${N[1]} winners</th><th class="cb">${N[1]} errors</th></tr></thead><tbody>${shotRows.map(k=>`<tr><td>${SHOT[k]}</td><td>${cell(S.sw[0][k],0,smax)}</td><td>${cell(S.se[0][k],0,smax)}</td><td>${cell(S.sw[1][k],1,smax)}</td><td>${cell(S.se[1][k],1,smax)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="empty">Tag the final shot of rallies to see this.</p>';
+  // Serve / receive
+  const sr=(label,a,t)=>`<div class="sr"><span>${label}</span><div class="split"><span style="width:${pc(a[0],a[1])}%;background:var(--${t?'b':'a'})"></span></div><span class="n"><span class="pct">${pc(a[0],a[1])}%</span> ${a[0]}/${a[1]}</span></div>`;
+  const srvP=[0,1].map(t=>`<div style="margin-bottom:8px"><div class="${t?'cb':'ca'}" style="font-weight:600;font-size:14px">${N[t]}</div>${sr('On serve',S.srv[t],t)}${sr('On receive',S.rcv[t],t)}</div>`).join('');
+  // Length
+  const lenP=Object.entries(LEN).map(([k,l])=>{const a=S.len[k],n=a[0]+a[1];return `<div class="sr"><span>${l}</span><div class="split">${n?`<span style="width:${pc(a[0],n)}%;background:var(--a)"></span><span style="width:${100-pc(a[0],n)}%;background:var(--b)"></span>`:''}</div><span class="n">${n?`${a[0]}–${a[1]}`:'none'}</span></div>`}).join('');
+  $('#view-analysis').innerHTML=`
+    <div class="filters">${fchip('all','All games')}${gamesPlayed.map(g=>fchip(g,'Game '+(g+1))).join('')}<span class="sp"></span><button class="btn" id="copyCsv">Copy rallies as CSV</button></div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Points won</div><div class="v">${two(S.pts[0],S.pts[1])}</div></div>
+      <div class="tile"><div class="k">Winners hit</div><div class="v">${two(S.how[0].winner||0,S.how[1].winner||0)}</div></div>
+      <div class="tile"><div class="k">Unforced errors</div><div class="v">${two(ue[0],ue[1])}</div></div>
+      <div class="tile"><div class="k">Longest run</div><div class="v">${two(S.run[0],S.run[1])}</div></div>
+    </div>
+    <div class="agrid">
+      <div class="panel span2"><h3>What the numbers say</h3><ul class="insights">${insights(S).map(x=>`<li>${x}</li>`).join('')}</ul>
+        <p class="caption">${S.n} rallies${S.n?`, ${pc(S.tagged,S.n)}% tagged`:''}. <span class="ca">${N[0]}</span> vs <span class="cb">${N[1]}</span>.</p></div>
+      <div class="panel span2"><h3>Momentum</h3>${momentum(rows)}
+        <div class="legend"><span><i style="background:var(--a)"></i>${N[0]} leads</span><span><i style="background:var(--b)"></i>${N[1]} leads</span><span>Bar height is the score margin after each rally.</span></div></div>
+      <div class="panel"><h3>How points were won</h3>${howT}</div>
+      <div class="panel"><h3>Serve and receive</h3>${srvP}</div>
+      <div class="panel"><h3>Final shot of the rally</h3>${shotT}<p class="caption">Errors are counted against the player who made them.</p></div>
+      <div class="panel"><h3>Rally length</h3>${lenP}<div class="legend"><span><i style="background:var(--a)"></i>${N[0]} won</span><span><i style="background:var(--b)"></i>${N[1]} won</span></div></div>
+    </div>
+    <textarea id="csvOut" hidden readonly aria-label="Rallies as CSV"></textarea>`;
+}
+
+function renderRules(){
+  if($('#view-rules').dataset.done) return;
+  $('#view-rules').dataset.done='1';
+  $('#view-rules').innerHTML=`
+  <div class="rules">
+    <div class="panel span2">
+      <h2>The court</h2>
+      ${courtSVG({mode:'doubles',dims:true,aria:'Badminton court with dimensions'})}
+      <p class="caption">Singles uses the inner sidelines and the back boundary line. Doubles uses the outer sidelines, but on the serve only it uses the doubles long service line 0.76 m in from the back. A shuttle landing on a line is in.</p>
+    </div>
+    <div class="panel">
+      <h2>Scoring</h2>
+      <ul>
+        <li>Every rally scores a point, whoever served (rally-point scoring).</li>
+        <li>A game is to 21. At 20–all you need a 2-point lead.</li>
+        <li>At 29–all the next point wins, so no game passes 30.</li>
+        <li>A match is best of 3 games. The winner of a game serves first in the next.</li>
+        <li>An interval of up to 60 seconds when the leading side reaches 11. Up to 2 minutes between games.</li>
+        <li>Players change ends after each game, and in game 3 when the leading side reaches 11.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>Serving in singles</h2>
+      <ul>
+        <li>Server's score even (0, 2, 4…): serve from the right service court. Odd: from the left.</li>
+        <li>Serve diagonally into the opponent's matching court.</li>
+        <li>Win the rally as server: you serve again from the other court. Lose it: your opponent serves.</li>
+        <li>Singles service court is long and narrow: short service line to back boundary, inner sidelines.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>Serving in doubles</h2>
+      <ul>
+        <li>Each side gets one serve turn. Serving side's score even: right court. Odd: left.</li>
+        <li>Serving side wins the rally: the same player serves again and the pair swap courts.</li>
+        <li>Receiving side wins: they gain the serve and nobody moves. The player standing in the court that matches their new score serves.</li>
+        <li>Only the receiver may return the serve.</li>
+        <li>Doubles service court is short and wide: short service line to doubles long service line, outer sidelines.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>Common faults</h2>
+      <ul>
+        <li>Service: the whole shuttle must be below 1.15 m when struck (BWF fixed-height rule; some local events still use waist height). Hit the cork first, one continuous forward swing, both feet on the floor and still.</li>
+        <li>Shuttle lands outside the lines, fails to cross the net, or goes through or under it.</li>
+        <li>Shuttle touches a player's body or clothing, or is hit twice by the same side.</li>
+        <li>Touching the net or posts with racket or body during play, or reaching under the net into the opponent's court.</li>
+        <li>Hitting the shuttle before it crosses to your side (a follow-through over the net is allowed).</li>
+      </ul>
+    </div>
+    <div class="panel span2">
+      <h2>Tagging guide for analysis</h2>
+      <dl>
+        <dt>Winner</dt><dd>The opponent could not touch the shuttle or could not return it into play.</dd>
+        <dt>Forced error</dt><dd>An error made under pressure: late, stretched or off balance because of the previous shot.</dd>
+        <dt>Unforced error</dt><dd>An error with time and balance to play the shot properly.</dd>
+        <dt>Service fault</dt><dd>The rally ended on the serve because the server faulted.</dd>
+        <dt>Final shot</dt><dd>The last shot played: the winning shot, or the shot that went wrong.</dd>
+        <dt>Rally length</dt><dd>Count every hit including the serve. A quick estimate into 1–4, 5–9 or 10+ is enough.</dd>
+      </dl>
+      <p class="caption" style="margin-top:12px">For short PE rotations set games to 11 or 15 in New match. The engine keeps the same logic: 2-point lead, with a cap (15 for games to 11, 21 for games to 15).</p>
+    </div>
+  </div>`;
+}
+
+/* ---------- actions ---------- */
+let wakeLock=null;
+async function keepAwake(){try{if(!wakeLock&&navigator.wakeLock)wakeLock=await navigator.wakeLock.request('screen');wakeLock&&wakeLock.addEventListener('release',()=>wakeLock=null)}catch(e){}}
+function point(t){
+  if(replay(M).over) return;
+  const r={winner:t};
+  if(tag.outcome)r.outcome=tag.outcome;
+  if(tag.shot||tag.outcome==='serve')r.shot=tag.outcome==='serve'?'serve':tag.shot;
+  if(tag.len)r.len=tag.len;
+  M.rallies.push(r); tag={outcome:null,shot:null,len:null}; save(); render(); keepAwake();
+}
+function undo(){if(M.rallies.length){M.rallies.pop();save();render()}}
+function toast(msg){const el=$('#toast');el.textContent=msg;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,1800)}
+function csv(){
+  const st=replay(M), q=s=>`"${String(s).replace(/"/g,'""')}"`;
+  const lines=[['game','rally','server','winner','score_a','score_b','outcome','final_shot','length'].join(',')];
+  st.rows.forEach((r,i)=>lines.push([r.game+1,i+1,q(M.cfg.teams[r.server].join(' / ')),q(M.cfg.teams[r.winner].join(' / ')),r.after[0],r.after[1],r.outcome?OUT[r.outcome]:'',r.shot?SHOT_ALL[r.shot]:'',r.len?LEN[r.len]:''].join(',')));
+  return lines.join('\n');
+}
+function openSetup(){window._setup=null;setupOpen=true;render()}
+
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button,a'); if(!b) return;
+  if(b.dataset.tab){tab=b.dataset.tab;setupOpen=false;try{localStorage.setItem(TABKEY,tab)}catch(e){};render();return}
+  if(b.dataset.go){e.preventDefault();tab=b.dataset.go;render();return}
+  if(b.dataset.point!=null){point(+b.dataset.point);return}
+  if(b.dataset.tag){const g=b.dataset.tag;tag[g]=tag[g]===b.dataset.val?null:b.dataset.val;document.querySelectorAll(`[data-tag="${g}"]`).forEach(x=>x.setAttribute('aria-pressed',String(tag[g]===x.dataset.val)));return}
+  if(b.dataset.gf){gf=b.dataset.gf==='all'?'all':+b.dataset.gf;renderAnalysis();return}
+  if(b.dataset.seg){const f=window._setup,k=b.dataset.seg,v=b.dataset.val;f[k]=k==='mode'?v:+v;renderSetup();return}
+  if(b.id==='undo')return undo();
+  if(b.id==='newMatch'||b.id==='sampleNew')return openSetup();
+  if(b.id==='cancelSetup'){setupOpen=false;render();return}
+  if(b.id==='copyCsv'){
+    const text=csv(), ta=$('#csvOut');
+    const fallback=()=>{ta.hidden=false;ta.value=text;ta.focus();ta.select();toast('Select all and copy the CSV below')};
+    try{navigator.clipboard.writeText(text).then(()=>toast('Copied '+replay(M).rows.length+' rallies as CSV'),fallback)}catch(err){fallback()}
+  }
+});
+document.addEventListener('input',e=>{const n=e.target.dataset&&e.target.dataset.name;if(n&&window._setup)window._setup.names[+n[0]][+n[1]]=e.target.value});
+document.addEventListener('submit',e=>{
+  e.preventDefault(); const f=window._setup, dbl=f.mode==='doubles';
+  const nm=(t,i,d)=>(f.names[t][i]||'').trim()||d;
+  const teams=dbl?[[nm(0,0,'A1'),nm(0,1,'A2')],[nm(1,0,'B1'),nm(1,1,'B2')]]:[[nm(0,0,'Player A')],[nm(1,0,'Player B')]];
+  M={cfg:{mode:f.mode,teams,firstServe:f.firstServe,points:f.points,bestOf:f.bestOf},rallies:[],sample:false};
+  tag={outcome:null,shot:null,len:null}; gf='all'; setupOpen=false; tab='score'; save(); render(); toast('Match started');
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.closest&&e.target.closest('input,select,textarea')||e.metaKey||e.ctrlKey||e.altKey) return;
+  if(tab!=='score'||setupOpen) return;
+  if(e.key==='1')point(0); else if(e.key==='2')point(1); else if(e.key==='u'||e.key==='U')undo();
+});
+render();
+</script>
+
+</body>
+</html>
