@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RallyBook Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#edf1ed; --surface:#fbfcfa; --surface-2:#e2e9e3; --ink:#13201a; --muted:#56675e; --line:#cdd8d0;
+  --court:#2e7a57; --court-line:#f4f7f2; --a:#1d5ea6; --a-soft:#dce7f4; --b:#b8325c; --b-soft:#f5dfe7;
+  --cork:#c98a1e; --good:#2e7a57; --bad:#b8452f;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0e1512; --surface:#16211c; --surface-2:#1e2b25; --ink:#e4ece7; --muted:#93a59b; --line:#2b3b34;
+    --court:#1f5a40; --court-line:#dfe8e2; --a:#7cb0f0; --a-soft:#1a2c42; --b:#ef83a3; --b-soft:#3b1e2a;
+    --cork:#e2ad4f; --good:#5fc093; --bad:#ec8a73;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:0 48px}
+.wrap{max-width:1280px;margin:0 auto}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+a{color:var(--a)}
+[hidden]{display:none!important}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:14px 10px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-family:var(--display);font-weight:700;font-size:26px;margin:0;line-height:1}
+.brand small{display:block;font-size:12px;color:var(--muted)}
+nav.links{display:flex;gap:14px;font-size:14px}
+nav.links a{text-decoration:none;color:var(--muted);font-weight:500}
+nav.links a.on{color:var(--ink)}
+h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:15px;margin:0 0 10px;color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.btn{border:1px solid var(--line);background:var(--surface);padding:8px 14px;border-radius:9px;font-weight:500;font-size:14px}
+.btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.num{font-variant-numeric:tabular-nums}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.banner{margin-top:16px;padding:12px 14px;border-radius:10px;border:1px solid var(--bad);color:var(--ink);background:var(--surface)}
+.banner code{font-size:13px}
+
+/* library */
+.drop{margin-top:18px;border:2px dashed var(--line);border-radius:14px;padding:28px 16px;text-align:center;background:var(--surface)}
+.drop.over{border-color:var(--a);background:var(--a-soft)}
+.drop b{font-family:var(--display);font-size:22px;font-weight:600;display:block}
+.drop p{margin:4px 0 12px;color:var(--muted);font-size:14px}
+.up{margin-top:10px;max-width:420px;margin-inline:auto}
+.bar{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--a);width:0;transition:width .3s}
+.lib{margin-top:18px;display:flex;flex-direction:column;gap:8px}
+.item{display:grid;grid-template-columns:120px 1fr auto;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
+.item img{width:120px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:var(--surface-2);display:block}
+.item .t{font-weight:600;overflow-wrap:anywhere}
+@media (max-width:560px){.item{grid-template-columns:1fr}.item img{width:100%}}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:99px;background:var(--surface-2)}
+.pill.done{background:var(--good);color:#fff}
+.pill.error{background:var(--bad);color:#fff}
+.pill.work{background:var(--cork);color:#1b1305}
+
+/* video workspace */
+.ws{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;margin-top:16px}
+@media (max-width:1000px){.ws{grid-template-columns:1fr}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.stage{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%}
+.stage canvas{pointer-events:none}
+.stage.picking canvas{pointer-events:auto;cursor:crosshair}
+.toggles{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--bg);padding:4px 11px;border-radius:99px;font-size:13px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.steps li.done{color:var(--muted);text-decoration:line-through}
+.steps li.cur{font-weight:600}
+.prog b{font-family:var(--display);font-size:22px}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.tile .k{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.tile .v{font-family:var(--display);font-size:28px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.ca{color:var(--a)} .cb{color:var(--b)}
+.rl{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto;display:flex;flex-direction:column}
+.rl li{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:8px 6px;border-bottom:1px solid var(--line);border-radius:6px;cursor:pointer}
+.rl li.sel{background:var(--surface-2)}
+.rl li.ignored{opacity:.45}
+.rl .n{font-family:var(--display);font-weight:700;font-size:18px;color:var(--muted)}
+.rl .l1{font-size:13.5px;font-weight:500}
+.rl .l2{font-size:12.5px;color:var(--muted)}
+.win{display:flex;gap:4px;margin-top:4px}
+.win button{border:1px solid var(--line);background:var(--bg);border-radius:6px;font-size:12px;padding:2px 8px}
+.win button[aria-pressed="true"].near{background:var(--a);color:#fff;border-color:var(--a)}
+.win button[aria-pressed="true"].far{background:var(--b);color:#fff;border-color:var(--b)}
+.win button[aria-pressed="true"].skip{background:var(--muted);color:var(--bg);border-color:var(--muted)}
+.mini{width:100%;max-width:300px;display:block;margin:0 auto}
+.mini .mat{fill:var(--court)} .mini .cl{stroke:var(--court-line);stroke-width:.05;fill:none}
+.mini .net{stroke:var(--court-line);stroke-width:.09;stroke-dasharray:.08 .1}
+.mini .ld-near{fill:var(--a)} .mini .ld-far{fill:var(--b)}
+.mini .ld{stroke:var(--court-line);stroke-width:.04}
+.mini .ld.dim{opacity:.35}
+.mini .hit{stroke:var(--cork);stroke-width:.06;fill:none}
+.mini .hp{fill:var(--cork)}
+.mini text{font:600 .32px var(--body);fill:var(--court-line)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field span{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.field input,.field select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kbd{font-size:12px;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:99px;font-size:14px;z-index:10}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><path d="M9 22 L4 6 L28 6 L23 22 Z" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M11 22 L8 6 M16 22 V6 M21 22 L24 6" stroke="var(--muted)" stroke-width="1.2"/><ellipse cx="16" cy="25" rx="7" ry="4.5" fill="var(--cork)"/></svg>
+      <div><h1>RallyBook Video</h1><small>Shuttle tracking · YOLO26 players · rally analysis</small></div>
+    </div>
+    <nav class="links"><a href="index.html">Scorebook</a><a href="video.html" class="on">Video analysis</a></nav>
+  </header>
+  <div id="offline" class="banner" hidden>
+    <b>The analysis server isn't running.</b> Video analysis runs on your PC's GPU, so this page only works through the local server.
+    Double-click <code>start.bat</code> in the rallybook folder, then open <a href="http://localhost:8765/video.html">http://localhost:8765/video.html</a>.
+  </div>
+  <div id="warn" class="banner" hidden></div>
+  <main id="app"></main>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtT=s=>{s=Math.max(0,s);const m=Math.floor(s/60);return m+':'+String(Math.floor(s%60)).padStart(2,'0')};
+const api=async(p,o={})=>{const r=await fetch('/api'+p,o);if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}return r.headers.get('content-type')?.includes('json')?r.json():r};
+function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2200)}
+
+// Court model (metres). x across 0..6.10, y along 0..13.40 from the near baseline.
+const CL=6.10, CLEN=13.40, NET=6.70;
+const COURT_LINES=[[0,0,6.1,0],[0,13.4,6.1,13.4],[0,0,0,13.4],[6.1,0,6.1,13.4],[.46,0,.46,13.4],[5.64,0,5.64,13.4],
+  [0,NET-1.98,6.1,NET-1.98],[0,NET+1.98,6.1,NET+1.98],[0,.76,6.1,.76],[0,13.4-.76,6.1,13.4-.76],[3.05,0,3.05,NET-1.98],[3.05,NET+1.98,3.05,13.4]];
+const CORNERS=['near-left','near-right','far-right','far-left'];
+const CORNER_COURT=[[0,0],[6.1,0],[6.1,13.4],[0,13.4]];
+const SKEL=[[5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+
+// Solve the 3x3 homography mapping 4 src points to 4 dst points.
+function homography(src,dst){
+  const A=[],b=[];
+  for(let i=0;i<4;i++){const[x,y]=src[i],[u,v]=dst[i];
+    A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v)}
+  for(let c=0;c<8;c++){let p=c;for(let r=c+1;r<8;r++)if(Math.abs(A[r][c])>Math.abs(A[p][c]))p=r;
+    [A[c],A[p]]=[A[p],A[c]];[b[c],b[p]]=[b[p],b[c]];
+    for(let r=0;r<8;r++){if(r===c)continue;const f=A[r][c]/A[c][c];for(let k=c;k<8;k++)A[r][k]-=f*A[c][k];b[r]-=f*b[c]}}
+  const h=b.map((v,i)=>v/A[i][i]);return[[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]];
+}
+const apply=(H,[x,y])=>{const w=H[2][0]*x+H[2][1]*y+H[2][2];return[(H[0][0]*x+H[0][1]*y+H[0][2])/w,(H[1][0]*x+H[1][1]*y+H[1][2])/w]};
+
+let S={view:'library',vid:null,poll:null};
+
+/* ------------------------------------------------------------ routing */
+window.addEventListener('hashchange',route);
+function route(){
+  clearTimeout(S.poll);
+  const id=location.hash.slice(1);
+  if(id){S.vid=id;openVideo(id)}else{S.vid=null;renderLibrary()}
+}
+
+/* ------------------------------------------------------------ library */
+async function renderLibrary(){
+  $('#app').innerHTML=`
+    <div class="drop" id="drop">
+      <b>Upload a match video</b>
+      <p>MP4, MOV or AVI. Best results: camera high behind one baseline with the whole court in view.</p>
+      <label class="btn primary" for="file">Choose video</label>
+      <input type="file" id="file" accept="video/*" hidden>
+      <div class="up" id="up" hidden><div class="bar"><i id="upbar"></i></div><div class="small muted" id="uptxt"></div></div>
+    </div>
+    <div class="lib" id="lib"><p class="muted small">Loading…</p></div>`;
+  const drop=$('#drop');
+  ['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('over')}));
+  ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('over')}));
+  drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)upload(f)});
+  $('#file').addEventListener('change',ev=>{const f=ev.target.files[0];if(f)upload(f)});
+  refreshLibrary();
+}
+async function refreshLibrary(){
+  if(S.vid) return;
+  let vids;
+  try{vids=await api('/videos')}catch(e){return}
+  const lib=$('#lib'); if(!lib) return;
+  if(!vids.length){lib.innerHTML='<p class="muted small">No videos yet.</p>';return}
+  lib.innerHTML=vids.map(v=>{
+    const st=v.status||{}, s=st.state;
+    const pill=s==='done'?'<span class="pill done">Analysed</span>':s==='error'?'<span class="pill error">Error</span>':s==='needs_court'?'<span class="pill">Mark the court</span>':`<span class="pill work">${esc(st.stage||s)} ${Math.round((st.progress||0)*100)}%</span>`;
+    const thumb=v.meta?`<img src="/api/videos/${v.id}/frame.jpg?t=${Math.min(5,(v.meta.duration||0)/2)}" alt="" loading="lazy">`:'<img alt="">';
+    return `<div class="item">${thumb}<div><div class="t">${esc(v.name)}</div><div class="small muted">${v.meta?fmtT(v.meta.duration)+' · '+v.meta.w+'×'+v.meta.h+' · '+Math.round(v.meta.fps)+' fps · ':''}${new Date(v.created*1000).toLocaleString()}</div><div style="margin-top:4px">${pill}</div></div>
+      <div class="row"><a class="btn primary" href="#${v.id}">Open</a><button class="btn danger" data-del="${v.id}">Delete</button></div></div>`}).join('');
+  if(vids.some(v=>!['done','error','needs_court'].includes(v.status?.state))) S.poll=setTimeout(refreshLibrary,2000);
+}
+function upload(file){
+  $('#up').hidden=false;
+  const fd=new FormData();fd.append('file',file);
+  const x=new XMLHttpRequest();x.open('POST','/api/videos');
+  x.upload.onprogress=e=>{if(e.lengthComputable){$('#upbar').style.width=(e.loaded/e.total*100)+'%';$('#uptxt').textContent=`Uploading ${file.name}: ${(e.loaded/1e6).toFixed(0)} of ${(e.total/1e6).toFixed(0)} MB`}};
+  x.onload=()=>{if(x.status===200){location.hash=JSON.parse(x.responseText).id}else{$('#uptxt').textContent='Upload failed: '+x.responseText}};
+  x.onerror=()=>{$('#uptxt').textContent='Upload failed. Is the server running?'};
+  x.send(fd);
+}
+document.addEventListener('click',async e=>{
+  const d=e.target.closest('[data-del]');
+  if(d){
+    if(d.dataset.confirm!=='1'){d.dataset.confirm='1';d.textContent='Click again to delete';setTimeout(()=>{d.dataset.confirm='';d.textContent='Delete'},3000);return}
+    await api('/videos/'+d.dataset.del,{method:'DELETE'});toast('Video deleted');refreshLibrary();
+  }
+});
+
+/* ------------------------------------------------------------ one video */
+async function openVideo(id){
+  let v;
+  try{v=await api('/videos/'+id)}catch(e){$('#app').innerHTML=`<p style="margin-top:18px">That video was not found. <a href="#">Back to videos</a></p>`;return}
+  if(S.vid!==id) return;
+  const st=v.status||{};
+  if(st.state==='needs_court') return renderCourtSetup(v);
+  if(st.state==='done') return renderReview(v);
+  if(st.state==='error') return renderError(v);
+  renderProgress(v);
+}
+function renderProgress(v){
+  const st=v.status, pct=Math.round((st.progress||0)*100);
+  const stages=['Preparing video','Mark the court corners','Tracking the shuttle (TrackNetV3)','Finding players (YOLO26-pose)','Splitting rallies and finding hits'];
+  const cur=stages.indexOf(st.stage);
+  const same=$('#progbox')&&$('#progbox').dataset.vid===v.info.id;
+  const html=`<div class="panel prog" id="progbox" data-vid="${v.info.id}" style="margin-top:18px;max-width:640px">
+    <p class="small" style="margin:0 0 6px"><a href="#">← All videos</a></p>
+    <h2 class="sec">${esc(v.info.name)}</h2>
+    <p style="margin:0 0 8px"><b class="num">${pct}%</b> <span class="muted">${esc(st.stage||'Waiting')}</span></p>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <ol class="steps" style="margin-top:14px">${stages.map((s,i)=>`<li class="${i<cur?'done':i===cur?'cur':''}">${s}</li>`).join('')}</ol>
+    <p class="small muted" style="margin:12px 0 0">You can leave this page. Processing continues on the server. A 10-minute 1080p video takes roughly 10–20 minutes on an RTX 3060 Ti.</p>
+  </div>`;
+  if(same){$('#progbox').outerHTML=html}else $('#app').innerHTML=html;
+  S.poll=setTimeout(()=>openVideo(v.info.id),1500);
+}
+function renderError(v){
+  $('#app').innerHTML=`<div class="panel" style="margin-top:18px;max-width:760px">
+    <p class="small" style="margin:0 0 6px"><a href="#">← All videos</a></p>
+    <h2 class="sec">${esc(v.info.name)}</h2>
+    <p><b>Something went wrong during “${esc(v.status.stage||'processing')}”.</b></p>
+    <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:10px;border-radius:8px;max-height:260px;overflow:auto">${esc(v.status.error)}</pre>
+    <div class="row"><button class="btn primary" id="retry">Try again</button>${v.meta?'<button class="btn" id="recourt">Re-mark the court</button>':''}</div>
+  </div>`;
+  $('#retry').onclick=async()=>{await api('/videos/'+v.info.id+'/retry',{method:'POST'});openVideo(v.info.id)};
+  const rc=$('#recourt'); if(rc) rc.onclick=()=>renderCourtSetup(v);
+}
+
+/* ------------------------------------------------------------ court setup */
+function stageBox(meta){return `<div class="stage" id="stage" style="aspect-ratio:${meta.w}/${meta.h}"><video id="vid" src="/api/videos/${S.vid}/video.mp4" preload="auto" playsinline></video><canvas id="cv"></canvas></div>`}
+function sizeCanvas(meta){const cv=$('#cv');cv.width=meta.w;cv.height=meta.h;return cv.getContext('2d')}
+
+function renderCourtSetup(v){
+  const meta=v.meta; let pts=(v.court&&v.court.corners)?v.court.corners.map(p=>[...p]):[];
+  $('#app').innerHTML=`<div class="ws">
+    <div class="col">${stageBox(meta)}
+      <div class="row"><button class="btn" id="play">Play / pause</button><input type="range" id="seek" min="0" max="${meta.duration}" step="0.04" value="0" style="flex:1;min-width:140px" aria-label="Scrub video"><span class="kbd num" id="tc">0:00</span></div>
+    </div>
+    <div class="col"><div class="panel">
+      <p class="small" style="margin:0 0 6px"><a href="#">← All videos</a></p>
+      <h2 class="sec">Mark the court</h2>
+      <p class="small" style="margin-top:0">Scrub to a frame where the court lines are clear, then click the <b>outer (doubles) court corners</b> in this order. "Near" is the end closest to the camera.</p>
+      <ol class="steps" id="csteps">${CORNERS.map(c=>`<li>${c.replace('-',' ')}</li>`).join('')}</ol>
+      <p class="small muted">The court lines appear once all 4 are placed. Check they sit on the real lines. Click <b>Reset</b> to redo them.</p>
+      <div class="field" style="margin:10px 0"><span>Event</span><select id="mode"><option value="auto">Detect automatically</option><option value="singles">Singles</option><option value="doubles">Doubles</option></select></div>
+      <div class="row"><button class="btn" id="reset">Reset corners</button><button class="btn primary" id="go" disabled>Analyse video</button></div>
+    </div></div></div>`;
+  if(v.court&&v.court.mode) $('#mode').value=v.court.mode;
+  const vid=$('#vid'), ctx=sizeCanvas(meta), stage=$('#stage'); stage.classList.add('picking');
+  const draw=()=>{
+    ctx.clearRect(0,0,meta.w,meta.h);
+    const lw=Math.max(2,meta.w/640);
+    if(pts.length===4){
+      const H=homography(CORNER_COURT,pts);
+      ctx.strokeStyle='rgba(255,214,90,.95)';ctx.lineWidth=lw;
+      for(const[a,b,c,d]of COURT_LINES){const p=apply(H,[a,b]),q=apply(H,[c,d]);ctx.beginPath();ctx.moveTo(...p);ctx.lineTo(...q);ctx.stroke()}
+      const n1=apply(H,[-.3,NET]),n2=apply(H,[6.4,NET]);ctx.setLineDash([lw*4,lw*3]);ctx.beginPath();ctx.moveTo(...n1);ctx.lineTo(...n2);ctx.stroke();ctx.setLineDash([]);
+    }
+    pts.forEach((p,i)=>{ctx.fillStyle='#ffd65a';ctx.strokeStyle='#000';ctx.lineWidth=lw;ctx.beginPath();ctx.arc(p[0],p[1],lw*5,0,7);ctx.fill();ctx.stroke();
+      ctx.font=`600 ${lw*11}px IBM Plex Sans, sans-serif`;ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=lw*2.5;ctx.strokeText(CORNERS[i],p[0]+lw*8,p[1]-lw*8);ctx.fillText(CORNERS[i],p[0]+lw*8,p[1]-lw*8)});
+    document.querySelectorAll('#csteps li').forEach((li,i)=>li.className=i<pts.length?'done':i===pts.length?'cur':'');
+    $('#go').disabled=pts.length!==4;
+  };
+  $('#cv').addEventListener('click',e=>{
+    if(pts.length>=4) return;
+    const r=e.target.getBoundingClientRect();pts.push([(e.clientX-r.left)/r.width*meta.w,(e.clientY-r.top)/r.height*meta.h]);draw();
+  });
+  $('#reset').onclick=()=>{pts=[];draw()};
+  $('#play').onclick=()=>vid.paused?vid.play():vid.pause();
+  $('#seek').oninput=e=>{vid.currentTime=+e.target.value};
+  vid.ontimeupdate=()=>{$('#seek').value=vid.currentTime;$('#tc').textContent=fmtT(vid.currentTime)};
+  vid.addEventListener('loadeddata',()=>{if(vid.currentTime===0)vid.currentTime=Math.min(3,meta.duration/2)},{once:true});
+  $('#go').onclick=async()=>{
+    $('#go').disabled=true;
+    try{await api('/videos/'+S.vid+'/analyse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({corners:pts,mode:$('#mode').value})});openVideo(S.vid)}
+    catch(e){toast(e.message);$('#go').disabled=false}
+  };
+  draw();
+}
+
+/* ------------------------------------------------------------ review */
+let R=null; // {res, players, review, sel, show}
+async function renderReview(v){
+  const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
+  const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,players:true,hits:true},v,names:loadNames()};
+  const meta=res.meta;
+  $('#app').innerHTML=`<div class="ws">
+    <div class="col">
+      ${stageBox(meta)}
+      <div class="row">
+        <button class="btn" id="prev" title="Previous rally ([)">◀ Rally</button><button class="btn" id="play">Play / pause</button><button class="btn" id="next" title="Next rally (])">Rally ▶</button>
+        <label class="small row" style="gap:6px"><input type="checkbox" id="loop"> Stop at end of rally</label>
+        <span class="kbd num" id="tc" style="margin-left:auto">0:00</span>
+      </div>
+      <div class="toggles">${Object.keys(R.show).map(k=>`<button class="chip" data-show="${k}" aria-pressed="true">${{court:'Court lines',shuttle:'Shuttle trail',players:'Players',hits:'Hits'}[k]}</button>`).join('')}</div>
+      <div class="tiles" id="tiles"></div>
+      <div class="panel" id="detail"></div>
+    </div>
+    <div class="col">
+      <div class="panel">
+        <p class="small" style="margin:0 0 6px"><a href="#">← All videos</a> · <a href="#" id="recourt">Re-mark court</a></p>
+        <h2 class="sec">${esc(v.info.name)}</h2>
+        <div class="pair"><div class="field"><span class="ca">Near side</span><input id="nearName" value="${esc(R.names.near)}" maxlength="24"></div>
+        <div class="field"><span class="cb">Far side</span><input id="farName" value="${esc(R.names.far)}" maxlength="24"></div></div>
+        <p class="small muted" style="margin:8px 0 0">${res.mode==='doubles'?'Doubles':'Singles'} · ${res.rallies.length} rallies found. Winners are guesses from where the shuttle landed. Fix any that are wrong.</p>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="toScore">Send to Scorebook</button>
+          <label class="small row" style="gap:6px"><input type="checkbox" id="swapEnds" checked> Players change ends between games</label></div>
+        <p class="small muted" style="margin:6px 0 0">Names are the players at the start of the video, which should begin at 0–0 in game 1.</p>
+        <div id="sendConfirm" hidden class="small" style="margin-top:8px">This replaces the match on the Scorebook page. <button class="btn" id="sendYes">Replace it</button> <button class="btn" id="sendNo">Cancel</button></div>
+      </div>
+      <div class="panel"><h2 class="sec">Landing spots</h2><div id="mini"></div></div>
+      <div class="panel"><h2 class="sec">Rallies</h2><ol class="rl" id="rl"></ol></div>
+    </div></div>`;
+  const vid=$('#vid'), ctx=sizeCanvas(meta);
+  R.vid=vid;R.ctx=ctx;
+  api('/videos/'+S.vid+'/players.json').then(p=>{R.players=p;drawOverlay()}).catch(()=>{});
+  $('#play').onclick=()=>vid.paused?vid.play():vid.pause();
+  $('#prev').onclick=()=>step(-1);$('#next').onclick=()=>step(1);
+  $('#recourt').onclick=e=>{e.preventDefault();renderCourtSetup({...v,meta})};
+  document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{R.show[b.dataset.show]=!R.show[b.dataset.show];b.setAttribute('aria-pressed',R.show[b.dataset.show]);drawOverlay()});
+  ['nearName','farName'].forEach(id=>$('#'+id).oninput=()=>{R.names={near:$('#nearName').value,far:$('#farName').value};saveNames();renderTiles();renderList()});
+  $('#toScore').onclick=()=>{$('#sendConfirm').hidden=false};
+  $('#sendNo').onclick=()=>{$('#sendConfirm').hidden=true};
+  $('#sendYes').onclick=sendToScorebook;
+  vid.ontimeupdate=()=>{
+    $('#tc').textContent=fmtT(vid.currentTime);
+    if($('#loop').checked&&R.sel!=null){const r=res.rallies[R.sel];if(vid.currentTime>r.t1+0.6){vid.pause();vid.currentTime=r.t1+0.6}}
+  };
+  const tick=()=>{drawOverlay();if(R&&R.vid===vid){vid.requestVideoFrameCallback?vid.requestVideoFrameCallback(tick):requestAnimationFrame(tick)}};
+  tick(); vid.addEventListener('seeked',drawOverlay);
+  renderTiles();renderList();renderMini();renderDetail();
+}
+function loadNames(){try{return JSON.parse(localStorage.getItem('rallybook-names-'+S.vid))||{near:'Near player',far:'Far player'}}catch(e){return{near:'Near player',far:'Far player'}}}
+function saveNames(){try{localStorage.setItem('rallybook-names-'+S.vid,JSON.stringify(R.names))}catch(e){}}
+const nm=side=>esc(R.names[side]||side);
+const winnerOf=r=>R.ov[r.i]?.winner??r.winner_side;       // 'near' | 'far' | 'skip'
+const HOW={winner:'landed in',out:'landed out',net:"didn't cross the net"};
+
+function renderTiles(){
+  const rs=R.res.rallies.filter(r=>winnerOf(r)!=='skip');
+  const pts={near:0,far:0};rs.forEach(r=>pts[winnerOf(r)]++);
+  const shots=rs.map(r=>r.shots), avg=shots.length?(shots.reduce((a,b)=>a+b,0)/shots.length).toFixed(1):'–';
+  const longest=rs.reduce((m,r)=>r.shots>(m?.shots||0)?r:m,null);
+  $('#tiles').innerHTML=`
+    <div class="tile"><div class="k">Rallies won</div><div class="v"><span class="ca">${pts.near}</span> – <span class="cb">${pts.far}</span></div></div>
+    <div class="tile"><div class="k">Rallies</div><div class="v">${rs.length}</div></div>
+    <div class="tile"><div class="k">Avg shots</div><div class="v">${avg}</div></div>
+    <div class="tile"><div class="k">Longest rally</div><div class="v">${longest?longest.shots+' <span class="small muted">shots</span>':'–'}</div></div>`;
+}
+function renderList(){
+  $('#rl').innerHTML=R.res.rallies.map(r=>{
+    const w=winnerOf(r), corrected=R.ov[r.i]?.winner!=null;
+    return `<li data-r="${r.i}" class="${R.sel===r.i?'sel':''} ${w==='skip'?'ignored':''}">
+      <span class="n">${r.i+1}</span>
+      <div><div class="l1">${w==='skip'?'Not a rally':`<span class="${w==='near'?'ca':'cb'}">${nm(w)}</span> wins`} <span class="muted">· ${r.shots} shots · ${r.duration.toFixed(1)} s</span></div>
+      <div class="l2">${fmtT(r.t0)} · ${corrected?'corrected by you':`last shot ${HOW[r.how]}${r.confidence==='low'?' · unsure':''}`}</div>
+      <div class="win">${['near','far','skip'].map(k=>`<button class="${k}" data-win="${k}" data-ri="${r.i}" aria-pressed="${w===k}">${k==='skip'?'Ignore':nm(k)}</button>`).join('')}</div></div></li>`}).join('')||'<p class="muted small">No rallies found. Check the court corners and camera angle.</p>';
+}
+function renderMini(){
+  const rs=R.res.rallies, sel=R.sel!=null?rs[R.sel]:null;
+  // Top-down court, far end at the top. Court y flips so near is at the bottom.
+  const Y=y=>CLEN-y;
+  let s=`<svg viewBox="-0.6 -0.6 7.3 14.6" class="mini" role="img" aria-label="Landing spots on the court"><rect class="mat" x="0" y="0" width="6.1" height="13.4"/>`;
+  for(const[a,b,c,d]of COURT_LINES) s+=`<line class="cl" x1="${a}" y1="${Y(b)}" x2="${c}" y2="${Y(d)}"/>`;
+  s+=`<line class="net" x1="-.3" y1="${Y(NET)}" x2="6.4" y2="${Y(NET)}"/>`;
+  rs.forEach(r=>{const w=winnerOf(r);if(w==='skip')return;const[x,y]=r.landing.court;if(x<-1||x>7.1||y<-1||y>14.4)return;
+    s+=`<circle class="ld ld-${w} ${sel&&sel!==r?'dim':''}" cx="${x.toFixed(2)}" cy="${Y(y).toFixed(2)}" r="${sel===r?.2:.13}"><title>Rally ${r.i+1}</title></circle>`});
+  if(sel){
+    const hp=sel.hits.filter(h=>h.court).map(h=>[h.court[0],Y(h.court[1])]);
+    if(hp.length>1) s+=`<polyline class="hit" points="${hp.map(p=>p.map(v=>v.toFixed(2)).join(',')).join(' ')}"/>`;
+    hp.forEach((p,i)=>s+=`<circle class="hp" cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r=".1"/>`);
+  }
+  s+=`<text x="0" y="-0.2">${esc(R.names.far)}</text><text x="0" y="14.0">${esc(R.names.near)}</text></svg>`;
+  $('#mini').innerHTML=s+`<p class="small muted" style="margin:6px 0 0">Dots are where each rally ended, coloured by who won it.${sel?' Gold line: where each shot of the selected rally was played from.':' Pick a rally to see where its shots were played from.'}</p>`;
+}
+function renderDetail(){
+  const r=R.sel!=null?R.res.rallies[R.sel]:null;
+  if(!r){$('#detail').innerHTML=`<h2 class="sec">Rally detail</h2><p class="small muted" style="margin:0">Pick a rally from the list, or press ] to jump to the next one.</p>`;return}
+  const mv=r.movement.filter(m=>m.metres>0.5).map(m=>`<span class="${m.side==='near'?'ca':'cb'}">${m.side==='near'?nm('near'):nm('far')}${R.res.mode==='doubles'?' #'+m.id:''}</span> ${m.metres} m`).join(' · ');
+  $('#detail').innerHTML=`<h2 class="sec">Rally ${r.i+1}</h2>
+    <p style="margin:0 0 8px">${nm(r.server_side)} served. ${r.shots} shots in ${r.duration.toFixed(1)} s (${(r.shots/r.duration).toFixed(1)} shots per second). The last shot ${HOW[r.how]}${r.landing.in||r.how==='net'?'':' at '+fmtLand(r.landing.court)}.</p>
+    <div class="small muted">Distance covered: ${mv||'not enough player data'}</div>
+    <div class="row small" style="margin-top:8px;gap:6px">${r.hits.map((h,k)=>`<button class="chip" data-seek="${h.f}">${k+1}. <span class="${h.side==='near'?'ca':'cb'}">${h.side==='near'?nm('near'):nm('far')}</span> ${fmtT(h.f/R.res.meta.fps)}</button>`).join('')}</div>`;
+}
+function fmtLand([x,y]){const w=x<0?`${(-x).toFixed(1)} m wide`:x>CL?`${(x-CL).toFixed(1)} m wide`:'';const l=y<0?`${(-y).toFixed(1)} m long`:y>CLEN?`${(y-CLEN).toFixed(1)} m long`:'';return[w,l].filter(Boolean).join(', ')||'the line'}
+function select(i,seek=true){
+  R.sel=i;renderList();renderMini();renderDetail();
+  if(seek){R.vid.currentTime=Math.max(0,R.res.rallies[i].t0-1);R.vid.play()}
+  const li=document.querySelector(`#rl li[data-r="${i}"]`);li&&li.scrollIntoView({block:'nearest'});
+}
+function step(d){const n=R.res.rallies.length;if(!n)return;let i=R.sel==null?(d>0?0:n-1):R.sel+d;i=Math.max(0,Math.min(n-1,i));select(i)}
+async function saveReview(){
+  const rallies=Object.values(R.ov);
+  try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({rallies})})}catch(e){toast('Could not save: '+e.message)}
+}
+document.addEventListener('click',e=>{
+  if(!R||!document.contains(R.vid))return;
+  const w=e.target.closest('[data-win]');
+  if(w){e.stopPropagation();const i=+w.dataset.ri;const auto=R.res.rallies[i].winner_side;R.ov[i]=w.dataset.win===auto?{i}:{i,winner:w.dataset.win};if(R.ov[i].winner==null)delete R.ov[i];saveReview();renderList();renderTiles();renderMini();return}
+  const li=e.target.closest('#rl li');if(li){select(+li.dataset.r);return}
+  const sk=e.target.closest('[data-seek]');if(sk){R.vid.currentTime=+sk.dataset.seek/R.res.meta.fps-0.3;R.vid.play()}
+});
+document.addEventListener('keydown',e=>{
+  if(!R||!document.contains(R.vid)||e.target.closest('input,select,textarea'))return;
+  if(e.key===']')step(1);else if(e.key==='[')step(-1);else if(e.key===' '){e.preventDefault();R.vid.paused?R.vid.play():R.vid.pause()}
+});
+
+function drawOverlay(){
+  if(!R||!R.ctx)return;
+  const {ctx,res,vid}=R, meta=res.meta, W=meta.w, H=meta.h, lw=Math.max(2,W/640);
+  const f=Math.round(vid.currentTime*meta.fps);
+  ctx.clearRect(0,0,W,H);
+  if(R.show.court){
+    const Hm=res.court.Hinv;ctx.strokeStyle='rgba(255,214,90,.55)';ctx.lineWidth=lw*.8;
+    for(const[a,b,c,d]of COURT_LINES){ctx.beginPath();ctx.moveTo(...apply(Hm,[a,b]));ctx.lineTo(...apply(Hm,[c,d]));ctx.stroke()}
+  }
+  if(R.show.players&&R.players){
+    const ps=R.players[f]||R.players[f-1]||R.players[f+1]||[];
+    for(const p of ps){
+      const col=p[1]===0?'#5aa0ff':'#ff6f9a', k=p.slice(6);
+      ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.strokeRect(p[2],p[3],p[4]-p[2],p[5]-p[3]);
+      ctx.lineWidth=lw*1.2;
+      for(const[a,b]of SKEL){const ax=k[a*2],ay=k[a*2+1],bx=k[b*2],by=k[b*2+1];if(ax<0||bx<0)continue;ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke()}
+    }
+  }
+  if(R.show.shuttle){
+    const xs=res.shuttle.x, ys=res.shuttle.y, n=Math.round(meta.fps*0.5);
+    for(let i=Math.max(1,f-n);i<=f&&i<xs.length;i++){
+      if(xs[i]==null||xs[i-1]==null)continue;
+      ctx.strokeStyle=`rgba(255,196,60,${0.15+0.85*(1-(f-i)/n)})`;ctx.lineWidth=lw*1.6;ctx.beginPath();ctx.moveTo(xs[i-1],ys[i-1]);ctx.lineTo(xs[i],ys[i]);ctx.stroke();
+    }
+    if(xs[f]!=null){ctx.fillStyle='#ffd23c';ctx.strokeStyle='#000';ctx.lineWidth=lw*.8;ctx.beginPath();ctx.arc(xs[f],ys[f],lw*3.2,0,7);ctx.fill();ctx.stroke()}
+  }
+  const r=res.rallies.find(r=>f>=r.start-5&&f<=r.end+Math.round(meta.fps));
+  if(r&&R.show.hits){
+    for(const h of r.hits){
+      if(f<h.f||f>h.f+meta.fps*0.8)continue;
+      const a=1-(f-h.f)/(meta.fps*0.8);
+      ctx.strokeStyle=`rgba(255,255,255,${a})`;ctx.lineWidth=lw*1.5;ctx.beginPath();ctx.arc(h.px[0],h.px[1],lw*(8+(f-h.f)/2),0,7);ctx.stroke();
+    }
+    if(f>=r.landing.f&&f<=r.end+meta.fps){
+      const[lx,ly]=r.landing.px;ctx.strokeStyle=r.landing.in?'#4ee08a':'#ff5a4a';ctx.lineWidth=lw*1.5;
+      ctx.beginPath();ctx.moveTo(lx-lw*7,ly-lw*7);ctx.lineTo(lx+lw*7,ly+lw*7);ctx.moveTo(lx+lw*7,ly-lw*7);ctx.lineTo(lx-lw*7,ly+lw*7);ctx.stroke();
+    }
+  }
+  if(r){
+    const idx=r.hits.filter(h=>h.f<=f).length, txt=`Rally ${r.i+1} · shot ${idx}/${r.shots}`;
+    ctx.font=`600 ${lw*9}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(txt).width;
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(lw*6,lw*6,tw+lw*12,lw*16);ctx.fillStyle='#fff';ctx.fillText(txt,lw*12,lw*18);
+    if(R.sel!==r.i&&!vid.paused){R.sel=r.i;renderList();renderMini();renderDetail()}
+  }
+}
+
+function sendToScorebook(){
+  const rs=R.res.rallies.filter(r=>winnerOf(r)!=='skip');
+  if(!rs.length){toast('No rallies to send');return}
+  const team=s=>s==='near'?0:1, dbl=R.res.mode==='doubles';
+  const name=s=>(R.names[s]||s).trim();
+  const teams=dbl?[[name('near')+' 1',name('near')+' 2'],[name('far')+' 1',name('far')+' 2']]:[[name('near')],[name('far')]];
+  const lenOf=n=>n<=4?'s':n<=9?'m':'l';
+  // Players swap ends after each game and at 11 in game 3, so "near" is not always the same player.
+  const swap=$('#swapEnds').checked;
+  let flip=false,sc=[0,0],g=0,won=[0,0],mid=false;
+  const rallies=[];
+  for(const r of rs){
+    if(won[0]===2||won[1]===2)break;
+    const w=winnerOf(r),auto=R.ov[r.i]?.winner==null;
+    const t=flip?1-team(w):team(w);
+    rallies.push({winner:t,outcome:auto&&r.how==='winner'?'winner':null,len:lenOf(r.shots)});
+    sc[t]++;const hi=Math.max(...sc);
+    if((hi>=21&&Math.abs(sc[0]-sc[1])>=2)||hi===30){won[sc[0]>sc[1]?0:1]++;g++;sc=[0,0];mid=false;if(swap)flip=!flip}
+    else if(g===2&&!mid&&hi===11){mid=true;if(swap)flip=!flip}
+  }
+  const M={cfg:{mode:dbl?'doubles':'singles',teams,firstServe:team(rs[0].server_side),points:21,bestOf:3},
+    rallies,sample:false,source:{video:S.vid}};
+  try{localStorage.setItem('rallybook-v1',JSON.stringify(M));localStorage.setItem('rallybook-tab','analysis')}catch(e){toast('Could not save to the Scorebook');return}
+  location.href='index.html';
+}
+
+/* ------------------------------------------------------------ boot */
+(async()=>{
+  try{
+    const h=await api('/health');
+    const w=[];if(!h.cuda)w.push('PyTorch cannot see your NVIDIA GPU, so analysis will be very slow.');if(!h.tracknet_weights)w.push('TrackNetV3 weights are missing. Run <code>setup.ps1</code> again.');
+    if(w.length){$('#warn').hidden=false;$('#warn').innerHTML=w.join('<br>')}
+  }catch(e){$('#offline').hidden=false;return}
+  route();
+})();
+</script>
+</body>
+</html>

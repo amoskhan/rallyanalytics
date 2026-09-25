@@ -1,0 +1,16 @@
+# Install PyTorch with CUDA first (setup.ps1 does this):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+ultralytics>=8.4
+fastapi
+uvicorn[standard]
+python-multipart
+opencv-python
+numpy
+pandas
+scipy
+tqdm
+gdown
+parse
+pillow
+pycocotools
+lap
