@@ -72,6 +72,18 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 
 /* video workspace */
 .ws{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;margin-top:16px}
+.ws.review{grid-template-columns:minmax(0,1fr) minmax(320px,400px);align-items:start}
+.side{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+@media (max-width:1000px){.side{position:static;max-height:none}}
+.rallycard .winner{font-family:var(--display);font-size:26px;font-weight:700;line-height:1.15;margin:6px 0 2px}
+.rallycard .winner span{font-size:16px;font-weight:500;color:var(--muted)}
+.rallycard .shotline{margin:8px 0 6px;font-size:18px}
+.livemap{width:100%;max-width:300px;display:block;margin:0 auto}
+.livemap .mat{fill:var(--court)} .livemap .cl{stroke:var(--court-line);stroke-width:.05;fill:none}
+.livemap .net{stroke:var(--court-line);stroke-width:.09;stroke-dasharray:.08 .1}
+.livemap .lbl{font:700 .34px var(--body);fill:var(--court-line)}
+.livemap .pname{font:600 .3px var(--body);fill:var(--court-line)}
+.livemap .side{font:600 .36px var(--body);fill:var(--muted)}
 @media (max-width:1000px){.ws{grid-template-columns:1fr}}
 .col{display:flex;flex-direction:column;gap:14px;min-width:0}
 .stage{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden}
@@ -304,9 +316,21 @@ function renderCourtSetup(v){
       <ol class="steps" id="csteps">${CORNERS.map(c=>`<li>${c.replace('-',' ')}</li>`).join('')}</ol>
       <p class="small muted">The court lines appear once all 4 are placed. Check they sit on the real lines. Click <b>Reset</b> to redo them.</p>
       <div class="field" style="margin:10px 0"><span>Event</span><select id="mode"><option value="auto">Detect automatically</option><option value="singles">Singles</option><option value="doubles">Doubles</option></select></div>
+      <div class="field" style="margin:0 0 10px"><span>Players (optional, can change later)</span>
+        <div class="pair" id="setupNames"></div>
+        <span class="small muted" style="text-transform:none;letter-spacing:0;font-weight:400">Player 1 = the one on the left (from the camera) at the start of the video.</span></div>
       <div class="row"><button class="btn" id="reset">Reset corners</button><button class="btn primary" id="go" disabled>Analyse video</button></div>
     </div></div></div>`;
   if(v.court&&v.court.mode) $('#mode').value=v.court.mode;
+  let setupNames=normNames(null);
+  api('/videos/'+S.vid+'/review').then(rv=>{setupNames=normNames(rv.names);drawNames()}).catch(()=>{});
+  const drawNames=()=>{
+    const dbl=$('#mode').value!=='singles';
+    const f=(k,l,c)=>`<label class="field"><span class="${c}" style="font-size:11px">${l}</span><input data-sname="${k}" value="${setupNames[k]===defaultName(k)?'':esc(setupNames[k])}" placeholder="${defaultName(k)}" maxlength="24"></label>`;
+    $('#setupNames').innerHTML=f('near1',dbl?'Near 1':'Near','ca')+(dbl?f('near2','Near 2','ca'):'')+f('far1',dbl?'Far 1':'Far','cb')+(dbl?f('far2','Far 2','cb'):'');
+    document.querySelectorAll('[data-sname]').forEach(i=>i.oninput=()=>{setupNames[i.dataset.sname]=i.value.trim()||defaultName(i.dataset.sname)});
+  };
+  $('#mode').onchange=drawNames; drawNames();
   const vid=$('#vid'), ctx=sizeCanvas(meta), stage=$('#stage'); stage.classList.add('picking');
   const draw=()=>{
     ctx.clearRect(0,0,meta.w,meta.h);
@@ -340,7 +364,8 @@ function renderCourtSetup(v){
   vid.addEventListener('loadeddata',()=>{if(vid.currentTime===0)vid.currentTime=Math.min(3,meta.duration/2)},{once:true});
   $('#go').onclick=async()=>{
     $('#go').disabled=true;
-    try{await api('/videos/'+S.vid+'/analyse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({corners:pts,mode:$('#mode').value})});openVideo(S.vid)}
+    try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({names:setupNames})});
+      await api('/videos/'+S.vid+'/analyse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({corners:pts,mode:$('#mode').value})});openVideo(S.vid)}
     catch(e){toast(e.message);$('#go').disabled=false}
   };
   draw();
@@ -351,9 +376,10 @@ let R=null; // {res, players, review, sel, show}
 async function renderReview(v){
   const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
   const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
-  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:loadNames()};
-  const meta=res.meta;
-  $('#app').innerHTML=`<div class="ws">
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),live:{k:-2,r:-1}};
+  const meta=res.meta, dbl=res.mode==='doubles';
+  const nameField=(key,label,cls)=>`<div class="field"><span class="${cls}">${label}</span><input id="nm_${key}" data-name="${key}" value="${esc(R.names[key])}" maxlength="24"></div>`;
+  $('#app').innerHTML=`<div class="ws review">
     <div class="col">
       ${stageBox(meta)}
       <div class="row">
@@ -364,22 +390,26 @@ async function renderReview(v){
       <div class="toggles">${Object.keys(R.show).map(k=>`<button class="chip" data-show="${k}" aria-pressed="${R.show[k]}">${{court:'Court lines',shuttle:'Shuttle trail',raw:'Raw TrackNet points',players:'Player skeletons',labels:'Labels & speed',hits:'Hits & landing'}[k]}</button>`).join('')}</div>
       <div class="tiles" id="tiles"></div>
       <div class="panel" id="detail"></div>
-    </div>
-    <div class="col">
+      <div class="panel"><h2 class="sec">Rallies</h2><ol class="rl" id="rl"></ol></div>
       <div class="panel">
         <p class="small" style="margin:0 0 6px"><a href="#">← All videos</a> · <a href="#" id="recourt">Re-mark court</a></p>
         <h2 class="sec">${esc(v.info.name)}</h2>
-        <div class="pair"><div class="field"><span class="ca">Near side</span><input id="nearName" value="${esc(R.names.near)}" maxlength="24"></div>
-        <div class="field"><span class="cb">Far side</span><input id="farName" value="${esc(R.names.far)}" maxlength="24"></div></div>
-        <p class="small muted" style="margin:8px 0 0">${res.mode==='doubles'?'Doubles':'Singles'} · ${res.rallies.length} rallies found. Winners are guesses from where the shuttle landed. Fix any that are wrong.</p>
+        <p class="small muted" style="margin:0">${dbl?'Doubles':'Singles'} · ${res.rallies.length} rallies found. Winners are guesses from where the shuttle landed. Fix any that are wrong in the rally card or the list.</p>
         <div class="row" style="margin-top:10px"><button class="btn primary" id="toScore">Send to Scorebook</button>
           <label class="small row" style="gap:6px"><input type="checkbox" id="swapEnds" checked> Players change ends between games</label></div>
-        <p class="small muted" style="margin:6px 0 0">Names are the players at the start of the video, which should begin at 0–0 in game 1.</p>
+        <p class="small muted" style="margin:6px 0 0">The video should begin at 0–0 in game 1.</p>
         <div id="sendConfirm" hidden class="small" style="margin-top:8px">This replaces the match on the Scorebook page. <button class="btn" id="sendYes">Replace it</button> <button class="btn" id="sendNo">Cancel</button></div>
       </div>
-      <div class="panel"><h2 class="sec">Landing spots</h2><div id="mini"></div></div>
-      <div class="panel"><h2 class="sec">Rallies</h2><ol class="rl" id="rl"></ol></div>
-    </div></div>
+    </div>
+    <aside class="col side">
+      <div class="panel rallycard" id="rallyCard"></div>
+      <div class="panel"><h2 class="sec">Court map</h2><div id="live"></div></div>
+      <div class="panel"><h2 class="sec">Players</h2>
+        <div class="pair">${nameField('near1',dbl?'Near 1':'Near','ca')}${dbl?nameField('near2','Near 2','ca'):''}${nameField('far1',dbl?'Far 1':'Far','cb')}${dbl?nameField('far2','Far 2','cb'):''}</div>
+        <p class="small muted" style="margin:6px 0 10px">${dbl?'Player 1 is the one on the left (from the camera) at the start of the video. If a name lands on the wrong player, swap the names.':'Near is the player closest to the camera at the start.'}</p>
+        <div id="playerStats"></div>
+      </div>
+    </aside></div>
     <section class="lab" id="lab"></section>`;
   const vid=$('#vid'), ctx=sizeCanvas(meta);
   R.vid=vid;R.ctx=ctx;
@@ -388,7 +418,7 @@ async function renderReview(v){
   $('#prev').onclick=()=>step(-1);$('#next').onclick=()=>step(1);
   $('#recourt').onclick=e=>{e.preventDefault();renderCourtSetup({...v,meta})};
   document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{R.show[b.dataset.show]=!R.show[b.dataset.show];b.setAttribute('aria-pressed',R.show[b.dataset.show]);drawOverlay()});
-  ['nearName','farName'].forEach(id=>$('#'+id).oninput=()=>{R.names={near:$('#nearName').value,far:$('#farName').value};saveNames();renderTiles();renderList()});
+  document.querySelectorAll('[data-name]').forEach(inp=>inp.oninput=()=>{R.names[inp.dataset.name]=inp.value.trim()||defaultName(inp.dataset.name);saveNames();renderTiles();renderList();renderDetail();renderRallyCard();renderPlayerStats(currentRally());R.live.k=-2;renderLabRally()});
   $('#toScore').onclick=()=>{$('#sendConfirm').hidden=false};
   $('#sendNo').onclick=()=>{$('#sendConfirm').hidden=true};
   $('#sendYes').onclick=sendToScorebook;
@@ -398,11 +428,15 @@ async function renderReview(v){
   };
   const tick=()=>{drawOverlay();if(R&&R.vid===vid){vid.requestVideoFrameCallback?vid.requestVideoFrameCallback(tick):requestAnimationFrame(tick)}};
   tick(); vid.addEventListener('seeked',drawOverlay);
-  renderTiles();renderList();renderMini();renderDetail();renderLab();
+  renderTiles();renderList();renderDetail();renderRallyCard();renderLab();
 }
-function loadNames(){try{return JSON.parse(localStorage.getItem('rallybook-names-'+S.vid))||{near:'Near player',far:'Far player'}}catch(e){return{near:'Near player',far:'Far player'}}}
-function saveNames(){try{localStorage.setItem('rallybook-names-'+S.vid,JSON.stringify(R.names))}catch(e){}}
-const nm=side=>esc(R.names[side]||side);
+const NAME_KEYS=['near1','near2','far1','far2'];
+const defaultName=k=>({near1:'Near 1',near2:'Near 2',far1:'Far 1',far2:'Far 2'})[k];
+function normNames(n){const o={};NAME_KEYS.forEach(k=>o[k]=(n&&n[k])||defaultName(k));return o}
+let nameSave=null;
+function saveNames(){clearTimeout(nameSave);nameSave=setTimeout(()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({names:R.names})}).catch(e=>toast('Could not save names: '+e.message)),400)}
+// Team name for a side: one name in singles, "A / B" in doubles.
+const nm=side=>R.res.mode==='doubles'?`${esc(R.names[side+'1'])} / ${esc(R.names[side+'2'])}`:esc(R.names[side+'1']);
 const winnerOf=r=>R.ov[r.i]?.winner??r.winner_side;       // 'near' | 'far' | 'skip'
 const HOW={winner:'landed in',out:'landed out',net:"didn't cross the net",unknown:'was lost from view, so the winner is unknown'};
 
@@ -426,23 +460,77 @@ function renderList(){
       <div class="l2">${fmtT(r.t0)} · ${corrected?'corrected by you':`last shot ${HOW[r.how]}${r.confidence==='low'?' · unsure':''}`}</div>
       <div class="win">${['near','far','skip'].map(k=>`<button class="${k}" data-win="${k}" data-ri="${r.i}" aria-pressed="${w===k}">${k==='skip'?'Ignore':nm(k)}</button>`).join('')}</div></div></li>`}).join('')||'<p class="muted small">No rallies found. Check the court corners and camera angle.</p>';
 }
-function renderMini(){
-  const rs=R.res.rallies, sel=R.sel!=null?rs[R.sel]:null;
-  // Top-down court, far end at the top. Court y flips so near is at the bottom.
-  const Y=y=>CLEN-y;
-  let s=`<svg viewBox="-0.6 -0.6 7.3 14.6" class="mini" role="img" aria-label="Landing spots on the court"><rect class="mat" x="0" y="0" width="6.1" height="13.4"/>`;
+function currentRally(){return R.sel!=null?R.res.rallies[R.sel]:(rallyAt(Math.round(R.vid.currentTime*R.res.meta.fps))||R.res.rallies[0])}
+function renderRallyCard(){
+  const r=currentRally(), el=$('#rallyCard'); if(!el) return;
+  if(!r){el.innerHTML='<p class="muted small" style="margin:0">No rallies found.</p>';return}
+  const w=winnerOf(r), corrected=R.ov[r.i]?.winner!=null;
+  const why=corrected?'Set by you':r.how==='unknown'?'The shuttle was lost from view before it landed':`The last shot ${HOW[r.how]}`;
+  el.innerHTML=`<div class="row" style="justify-content:space-between"><span class="sec" style="margin:0">Rally ${r.i+1} of ${R.res.rallies.length}</span><span class="small muted num">${fmtT(r.t0)}–${fmtT(r.t1)}</span></div>
+    <div class="winner ${w==='near'?'ca':w==='far'?'cb':''}">${w==='near'||w==='far'?`${nm(w)} <span>won the rally</span>`:w==='skip'?'Not a rally':'Winner unknown'}</div>
+    <div class="small muted">${why}${!corrected&&r.confidence==='low'&&w!=null?' · unsure':''}</div>
+    <div class="shotline"><b class="num" id="shotNow">–</b> <span class="muted small" id="shotOf"></span></div>
+    <div class="win">${['near','far','skip'].map(k=>`<button class="${k}" data-win="${k}" data-ri="${r.i}" aria-pressed="${w===k}">${k==='skip'?'Not a rally':nm(k)+' won'}</button>`).join('')}</div>`;
+  R.live.k=-2;
+  // Refill the shot counter and court map now; while paused no video frame will do it.
+  setTimeout(()=>{if(R&&R.vid)liveTick(Math.round(R.vid.currentTime*R.res.meta.fps))},0);
+}
+
+// Court map beside the video. Each shot appears as it's hit: an arrow from where it was
+// played to where it went (the next contact, or the landing for the last shot).
+const SLOT_KEYS=['near1','near2','far1','far2'];
+function shotLegs(r){
+  return r.hits.map((h,k)=>{
+    const nx=r.hits[k+1], to=nx?nx.court:r.landing.court;
+    return {k,f:h.f,side:h.side,player:h.player,from:h.court,to,last:!nx};
+  });
+}
+function renderLive(r,k){
+  const el=$('#live'); if(!el) return;
+  if(!r){el.innerHTML='';return}
+  const Y=y=>CLEN-y, legs=shotLegs(r), cols={near:tok('a'),far:tok('b')};
+  let s=`<svg viewBox="-0.9 -0.9 7.9 15.2" class="livemap" role="img" aria-label="Shots of rally ${r.i+1} on the court"><defs>
+    <marker id="arrN" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="${cols.near}"/></marker>
+    <marker id="arrF" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="${cols.far}"/></marker>
+    <marker id="arrC" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="${tok('cork')}"/></marker></defs>
+    <rect class="mat" x="0" y="0" width="6.1" height="13.4"/>`;
   for(const[a,b,c,d]of COURT_LINES) s+=`<line class="cl" x1="${a}" y1="${Y(b)}" x2="${c}" y2="${Y(d)}"/>`;
   s+=`<line class="net" x1="-.3" y1="${Y(NET)}" x2="6.4" y2="${Y(NET)}"/>`;
-  rs.forEach(r=>{const w=winnerOf(r);if(w==='skip')return;if(!r.landing.court)return;const[x,y]=r.landing.court;if(x<-1||x>7.1||y<-1||y>14.4)return;
-    s+=`<circle class="ld ld-${w} ${sel&&sel!==r?'dim':''}" cx="${x.toFixed(2)}" cy="${Y(y).toFixed(2)}" r="${sel===r?.2:.13}"><title>Rally ${r.i+1}</title></circle>`});
-  if(sel){
-    const hp=sel.hits.filter(h=>h.court).map(h=>[h.court[0],Y(h.court[1])]);
-    if(hp.length>1) s+=`<polyline class="hit" points="${hp.map(p=>p.map(v=>v.toFixed(2)).join(',')).join(' ')}"/>`;
-    hp.forEach((p,i)=>s+=`<circle class="hp" cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r=".1"/>`);
+  // Past shots fade with age; the current shot is bold gold.
+  for(const L of legs){
+    if(L.k>k||!L.from||!L.to) continue;
+    const cur=L.k===k, age=k-L.k, op=cur?1:Math.max(.12,.55-age*.06);
+    const col=cur?tok('cork'):cols[L.side], mk=cur?'arrC':L.side==='near'?'arrN':'arrF';
+    s+=`<line x1="${L.from[0].toFixed(2)}" y1="${Y(L.from[1]).toFixed(2)}" x2="${L.to[0].toFixed(2)}" y2="${Y(L.to[1]).toFixed(2)}" stroke="${col}" stroke-width="${cur?.09:.05}" stroke-opacity="${op}" marker-end="url(#${mk})"/>`;
+    s+=`<circle cx="${L.to[0].toFixed(2)}" cy="${Y(L.to[1]).toFixed(2)}" r="${cur?.2:.13}" fill="${L.last?(r.landing.in===false?'#ff5a4a':'#4ee08a'):col}" fill-opacity="${cur?1:op+.2}" stroke="${tok('court-line')}" stroke-width=".03"/>`;
+    if(cur||age<4) s+=`<text x="${(L.to[0]+.24).toFixed(2)}" y="${(Y(L.to[1])+.12).toFixed(2)}" class="lbl" fill-opacity="${cur?1:.7}">${L.k+1}</text>`;
   }
-  s+=`<text x="0" y="-0.2">${esc(R.names.far)}</text><text x="0" y="14.0">${esc(R.names.near)}</text></svg>`;
-  $('#mini').innerHTML=s+`<p class="small muted" style="margin:6px 0 0">Dots are where each rally ended, coloured by who won it.${sel?' Gold line: where each shot of the selected rally was played from.':' Pick a rally to see where its shots were played from.'}</p>`;
+  s+=`<g id="liveDots"></g>`;
+  s+=`<text x="0" y="-0.3" class="side">${nm('far')}</text><text x="0" y="14.1" class="side">${nm('near')}</text></svg>`;
+  const L=legs[k];
+  const cap=k<0?'Play the rally: each shot appears on the court as it is hit.'
+    :`<b>Shot ${k+1}</b> · ${L.player!=null?esc(slotName(L.player)):(L.side==='near'?nm('near'):nm('far'))} · ${L.last?(r.landing.court?(r.landing.in?'landed in':'landed out'):'landing not seen'):'to the next contact'}`;
+  el.innerHTML=s+`<p class="small" style="margin:6px 0 0">${cap}</p><p class="small muted" style="margin:2px 0 0">Arrows run from where each shot was played to where it was played next. The last one ends where the rally ended (green = in, red = out). Big dots are the players right now.</p>`;
 }
+function renderPlayerStats(r){
+  const el=$('#playerStats'); if(!el) return;
+  if(!r){el.innerHTML='';return}
+  const shots={};r.hits.forEach(h=>{if(h.player!=null)shots[h.player]=(shots[h.player]||0)+1});
+  const cols=[tok('a'),tok('a'),tok('b'),tok('b')];
+  const rows=r.movement.slice().sort((a,b)=>a.id-b.id);
+  el.innerHTML=`<table class="t"><thead><tr><th>Player</th><th>Shots</th><th>Ran</th><th>Top speed</th></tr></thead><tbody>${rows.map(m=>`<tr><td><span style="color:${cols[m.id]}">■</span> ${esc(slotName(m.id))}</td><td class="num">${shots[m.id]||0}</td><td class="num">${m.metres} m</td><td class="num">${m.top_speed_ms} m/s</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No player data for this rally</td></tr>'}</tbody></table>`;
+}
+function liveTick(f){
+  const r=currentRally(); if(!r) return;
+  let k=-1;for(let i=0;i<r.hits.length;i++)if(r.hits[i].f<=f)k=i;
+  if(R.live.r!==r.i){R.live.r=r.i;renderRallyCard();renderPlayerStats(r)}
+  if(k!==R.live.k){R.live.k=k;renderLive(r,k);
+    const now=$('#shotNow'),of=$('#shotOf');
+    if(now){const total=r.shots_estimated??r.shots;now.textContent=k<0?'–':`Shot ${k+1}`;of.textContent=`of ${r.shots} seen${r.missed&&r.missed.length?` (${total} with inferred)`:''}`}}
+  const g=$('#liveDots'); if(g&&R.players){const ps=R.players[f]||R.players[f-1]||[];const cols=[tok('a'),tok('a'),tok('b'),tok('b')];
+    g.innerHTML=ps.map(p=>{const foot=[(p[2]+p[4])/2,p[5]];const[cx,cy]=apply(R.res.court.H,foot);const n=slotName(p[0]);return `<circle cx="${cx.toFixed(2)}" cy="${(CLEN-cy).toFixed(2)}" r=".26" fill="${cols[p[0]]}" stroke="${tok('court-line')}" stroke-width=".05"/><text x="${(cx+.32).toFixed(2)}" y="${(CLEN-cy+.12).toFixed(2)}" class="pname">${esc(n)}</text>`}).join('')}
+}
+
 function renderDetail(){
   const r=R.sel!=null?R.res.rallies[R.sel]:null;
   if(!r){$('#detail').innerHTML=`<h2 class="sec">Rally detail</h2><p class="small muted" style="margin:0">Pick a rally from the list, or press ] to jump to the next one.</p>`;return}
@@ -455,7 +543,7 @@ function renderDetail(){
 }
 function fmtLand([x,y]){const w=x<0?`${(-x).toFixed(1)} m wide`:x>CL?`${(x-CL).toFixed(1)} m wide`:'';const l=y<0?`${(-y).toFixed(1)} m long`:y>CLEN?`${(y-CLEN).toFixed(1)} m long`:'';return[w,l].filter(Boolean).join(', ')||'the line'}
 function select(i,seek=true){
-  R.sel=i;renderList();renderMini();renderDetail();renderLabRally();
+  R.sel=i;renderList();renderDetail();renderRallyCard();renderLabRally();
   if(seek){R.vid.currentTime=Math.max(0,R.res.rallies[i].t0-1);R.vid.play()}
   const li=document.querySelector(`#rl li[data-r="${i}"]`),rl=$('#rl');if(li&&rl){if(li.offsetTop<rl.scrollTop)rl.scrollTop=li.offsetTop;else if(li.offsetTop+li.offsetHeight>rl.scrollTop+rl.clientHeight)rl.scrollTop=li.offsetTop+li.offsetHeight-rl.clientHeight}
 }
@@ -467,7 +555,7 @@ async function saveReview(){
 document.addEventListener('click',e=>{
   if(!R||!document.contains(R.vid))return;
   const w=e.target.closest('[data-win]');
-  if(w){e.stopPropagation();const i=+w.dataset.ri;const auto=R.res.rallies[i].winner_side;R.ov[i]=w.dataset.win===auto?{i}:{i,winner:w.dataset.win};if(R.ov[i].winner==null)delete R.ov[i];saveReview();renderList();renderTiles();renderMini();return}
+  if(w){e.stopPropagation();const i=+w.dataset.ri;const auto=R.res.rallies[i].winner_side;R.ov[i]=w.dataset.win===auto?{i}:{i,winner:w.dataset.win};if(R.ov[i].winner==null)delete R.ov[i];saveReview();renderList();renderTiles();renderRallyCard();return}
   const li=e.target.closest('#rl li');if(li){select(+li.dataset.r);return}
   const sk=e.target.closest('[data-seek]');if(sk){R.vid.currentTime=+sk.dataset.seek/R.res.meta.fps-0.3;R.vid.play()}
 });
@@ -533,9 +621,10 @@ function drawOverlay(){
     const idx=r.hits.filter(h=>h.f<=f).length, txt=`Rally ${r.i+1} · shot ${idx}/${r.shots}`;
     ctx.font=`600 ${lw*9}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(txt).width;
     ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(lw*6,lw*6,tw+lw*12,lw*16);ctx.fillStyle='#fff';ctx.fillText(txt,lw*12,lw*18);
-    if(R.sel!==r.i&&!vid.paused){R.sel=r.i;renderList();renderMini();renderDetail();renderLabRally()}
+    if(R.sel!==r.i&&!vid.paused){R.sel=r.i;renderList();renderDetail();renderRallyCard();renderLabRally()}
   }
   labTick(f);
+  liveTick(f);
 }
 
 function sendToScorebook(){
@@ -569,7 +658,7 @@ function sendToScorebook(){
 /* ------------------------------------------------------------ tracking lab */
 // Shows every signal the pipeline measured and the thresholds it used, synced to the video.
 const SLOTS=['Near 1','Near 2','Far 1','Far 2'];
-const slotName=id=>R.res.mode==='singles'?(id<2?R.names.near||'Near':R.names.far||'Far'):(SLOTS[id]??'#'+id);
+const slotName=id=>R.names[SLOT_KEYS[id]]??('#'+id);
 let labSets=null, LAB={win:'around',lastShot:-1,base:null};
 const tok=k=>getComputedStyle(document.documentElement).getPropertyValue('--'+k).trim();
 const pct=(a,b)=>b?Math.round(a/b*100)+'%':'–';
@@ -604,10 +693,7 @@ function renderLab(){
     <div class="legend"><span><i style="background:var(--muted)"></i>Wide court view</span><span><i style="background:var(--bad)"></i>Camera cut</span><span><i style="background:var(--cork)"></i>Shuttle detected</span><span><i style="background:var(--good)"></i>Kept after cleaning</span><span><i style="background:#e0b43a"></i>Gap filled</span><span><i style="background:var(--bad)"></i>Outlier removed</span><span><i style="background:var(--ink)"></i>Rally</span><span><i style="background:var(--line)"></i>Rejected stretch</span><span><i style="background:var(--a)"></i>Near</span><span><i style="background:var(--b)"></i>Far</span></div>
   </div>
   <div class="panel" id="sigPanel"></div>
-  <div class="labgrid">
-    <div class="panel" id="shotPanel"></div>
-    <div class="panel" id="mapPanel"></div>
-  </div>
+  <div class="panel" id="shotPanel"></div>
   <details class="panel" id="settings"><summary><b>Detection settings and rejected stretches</b></summary>${renderSettings()}</details>`;
   $('#rerun').onclick=rerun;
   $('#tl').onclick=e=>{const r=e.target.getBoundingClientRect(),x=(e.clientX-r.left)/r.width;const L=TL_LEFT/r.width;if(x<L)return;R.vid.currentTime=(x-L)/(1-L)*res.meta.duration};
@@ -658,7 +744,7 @@ function labRally(){return R.sel!=null?R.res.rallies[R.sel]:(rallyAt(Math.round(
 function renderLabRally(){
   if(!R.res.pipeline||!$('#sigPanel')) return;
   const r=labRally();
-  if(!r){$('#sigPanel').innerHTML='<p class="muted small">No rallies to chart.</p>';$('#shotPanel').innerHTML='';$('#mapPanel').innerHTML='';return}
+  if(!r){$('#sigPanel').innerHTML='<p class="muted small">No rallies to chart.</p>';$('#shotPanel').innerHTML='';return}
   const P=R.res.pipeline.analysis;
   $('#sigPanel').innerHTML=`<div class="row" style="justify-content:space-between"><h3 class="sec" style="margin:0">Shuttle signal · Rally ${r.i+1}</h3>
     <div class="toggles"><button class="chip" data-sigwin="around" aria-pressed="${LAB.win==='around'}">10 s around playhead</button><button class="chip" data-sigwin="rally" aria-pressed="${LAB.win==='rally'}">Whole rally</button></div></div>
@@ -668,7 +754,7 @@ function renderLabRally(){
     <p class="small muted" style="margin:8px 0 0;max-width:95ch">How hits are found. A racket contact snaps the shuttle's velocity within a frame or two, while the top of a lift is a smooth curve. The lower chart is that <b>velocity snap</b> (change in velocity, in court heights per second). A peak becomes a hit if it's above <b>${P.contact_strong}</b> with a player's hand within ${P.contact_strong?P.hand_strong:''}× their height, or above <b>${P.contact_weak}</b> with a hand within ${P.hand_weak}× their height. Shots must alternate sides, so near/far is chosen for the whole rally at once from hand positions and which half of the picture the contact is in. The same side twice within 0.35 s is merged as one contact. Shots that must have happened but weren't seen are <b>inferred</b> and added to the count: one if the shuttle was already flying when tracking began, and one when the same side appears twice at least 0.9 s apart (usually a smash while the shuttle was above the picture). The upper chart is the shuttle's height in the picture (up = toward the far end).</p>`;
   document.querySelectorAll('[data-sigwin]').forEach(b=>b.onclick=()=>{LAB.win=b.dataset.sigwin;renderLabRally()});
   ['sig','spd'].forEach(id=>$('#'+id).onclick=e=>{const g=LAB.sigGeom;if(!g)return;const rr=e.target.getBoundingClientRect();const f=g.f0+((e.clientX-rr.left)-g.left)/g.iw*(g.f1-g.f0);R.vid.currentTime=Math.max(0,f/R.res.meta.fps)});
-  renderShotTable(r); renderCourtMap(r);
+  renderShotTable(r);
   LAB.lastShot=-1; labTick(Math.round(R.vid.currentTime*R.res.meta.fps),true);
 }
 
@@ -684,26 +770,6 @@ function renderShotTable(r){
       <td class="num">${s.arc_pct??'–'}${s.arc_pct!=null?'%':''}</td><td>${s.direction??'–'}</td><td class="num">${h.hand_dist_px??'–'}</td><td class="num">${h.strength??h.prominence??'–'}</td><td class="num">${h.hand_ratio??'–'}</td></tr>`}).join('')}</tbody></table></div>
     <p class="small muted" style="margin:8px 0 0">*Peak speed comes from the shuttle's movement in the picture at the hitter's depth. It's only a rough guide, because the shuttle's height above the floor isn't known. Average speed uses the players' floor positions, so it's more reliable but underestimates curved flights.</p>`;
   $('#shotTbl').onclick=e=>{const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
-}
-
-function renderCourtMap(r){
-  const Y=y=>CLEN-y, cols=[tok('a'),tok('a'),tok('b'),tok('b')];
-  let s=`<svg viewBox="-0.8 -0.8 7.7 15" class="mini map" role="img" aria-label="Player paths and hit positions"><rect class="mat" x="0" y="0" width="6.1" height="13.4"/>`;
-  for(const[a,b,c,d]of COURT_LINES) s+=`<line class="cl" x1="${a}" y1="${Y(b)}" x2="${c}" y2="${Y(d)}"/>`;
-  s+=`<line class="net" x1="-.3" y1="${Y(NET)}" x2="6.4" y2="${Y(NET)}"/>`;
-  for(const m of r.movement){ if(!m.path||m.path.length<2)continue;
-    s+=`<polyline points="${m.path.map(p=>p[0].toFixed(2)+','+Y(p[1]).toFixed(2)).join(' ')}" fill="none" stroke="${cols[m.id]||tok('muted')}" stroke-width=".05" stroke-opacity=".8" ${m.id%2?'stroke-dasharray=".15 .1"':''}/>`}
-  r.hits.forEach((h,k)=>{if(!h.court)return;s+=`<circle cx="${h.court[0].toFixed(2)}" cy="${Y(h.court[1]).toFixed(2)}" r=".12" fill="${tok('cork')}" stroke="${tok('court-line')}" stroke-width=".03"><title>Shot ${k+1}: ${slotName(h.player)}</title></circle>`});
-  if(r.landing.court){const[x,y]=r.landing.court;s+=`<path d="M${x-.2} ${Y(y)-.2}L${x+.2} ${Y(y)+.2}M${x+.2} ${Y(y)-.2}L${x-.2} ${Y(y)+.2}" stroke="${r.landing.in?'#4ee08a':'#ff5a4a'}" stroke-width=".08"/>`}
-  s+=`<g id="liveDots"></g></svg>`;
-  const shotsBy={};r.hits.forEach(h=>{if(h.player!=null)shotsBy[h.player]=(shotsBy[h.player]||0)+1});
-  const hand={};r.hits.forEach(h=>{if(h.player!=null&&h.hand_dist_px!=null)(hand[h.player]=hand[h.player]||[]).push(h.hand_dist_px)});
-  $('#mapPanel').innerHTML=`<h3 class="sec">Court map · Rally ${r.i+1}</h3>
-    <div class="maprow">${s}
-    <div style="min-width:0;flex:1"><table class="t"><thead><tr><th>Player</th><th>Ran</th><th>Top speed</th><th>Shots</th><th title="Median wrist-to-shuttle distance at contact">Hand px</th></tr></thead><tbody>
-      ${r.movement.slice().sort((a,b)=>a.id-b.id).map(m=>{const hd=(hand[m.id]||[]).sort((a,b)=>a-b);return `<tr><td><span style="color:${cols[m.id]}">■</span> ${slotName(m.id)}</td><td class="num">${m.metres} m</td><td class="num">${m.top_speed_ms} m/s</td><td class="num">${shotsBy[m.id]||0}</td><td class="num">${hd.length?hd[Math.floor(hd.length/2)]:'–'}</td></tr>`}).join('')||'<tr><td colspan="5" class="muted">No player data for this rally</td></tr>'}
-    </tbody></table>
-    <p class="small muted">Lines are each player's path on the floor (dashed = player 2). Gold dots mark where each shot was played. Big dots show where everyone is right now in the video. ${r.landing.court?'The cross marks where the rally ended.':'The shuttle was lost from view before it landed, so there is no landing mark.'}</p></div></div>`;
 }
 
 // Keep a row visible inside its own scroll box without moving the page.
@@ -725,9 +791,7 @@ function labTick(f,force){
   // Highlight the current shot
   let k=-1;for(let i=0;i<r.hits.length;i++)if(r.hits[i].f<=f)k=i;
   if(k!==LAB.lastShot||force){LAB.lastShot=k;document.querySelectorAll('#shotTbl tr.cur').forEach(t=>t.classList.remove('cur'));const tr=document.querySelector(`#shotTbl tr[data-k="${k}"]`);if(tr){tr.classList.add('cur');if(!R.vid.paused)scrollWithin(tr)}}
-  // Live player dots on the court map
-  const g=$('#liveDots'); if(g&&R.players){const ps=R.players[f]||R.players[f-1]||[];const cols=[tok('a'),tok('a'),tok('b'),tok('b')];
-    g.innerHTML=ps.map(p=>{const foot=[(p[2]+p[4])/2,p[5]];const[cx,cy]=apply(res.court.H,foot);return `<circle cx="${cx.toFixed(2)}" cy="${(CLEN-cy).toFixed(2)}" r=".22" fill="${cols[p[0]]}" stroke="${tok('court-line')}" stroke-width=".05"/>`}).join('')}
+
 }
 
 function drawSignal(r,f){

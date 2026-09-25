@@ -130,14 +130,21 @@ def players(vid: str):
 
 
 class ReviewIn(BaseModel):
-    rallies: list[dict]
+    rallies: list[dict] | None = None
+    names: dict[str, str] | None = None     # slot -> name: near1, near2, far1, far2
 
 
 @app.put("/api/videos/{vid}/review")
 def save_review(vid: str, body: ReviewIn):
-    """Stores the user's corrections (winner per rally, deleted rallies) next to the result."""
+    """Stores the user's corrections (winner per rally) and player names next to the result.
+    Only the fields sent are updated."""
     _need(vid)
-    job.write_json(vid, "review.json", {"rallies": body.rallies})
+    cur = job.read_json(vid, "review.json", {}) or {}
+    if body.rallies is not None:
+        cur["rallies"] = body.rallies
+    if body.names is not None:
+        cur["names"] = {k: str(v)[:24] for k, v in body.names.items() if k in ("near1", "near2", "far1", "far2")}
+    job.write_json(vid, "review.json", cur)
     return {"ok": True}
 
 
