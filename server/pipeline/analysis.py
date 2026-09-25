@@ -201,7 +201,32 @@ def _split(segs, breaks, ok):
     return out
 
 
-def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None):
+def _bridge_top_exits(segs, x, y, cuts, wide, fps, img_h, max_gap_s=3.0, edge_frac=0.06):
+    """Join segments split only because a high shot left the top of the picture.
+
+    High lobs and clears often fly above the camera's view for a second or more. That gap
+    is not a break between rallies if nothing else happened: no camera cut, the wide court
+    view stayed on screen, and the shuttle left or came back in through the top edge."""
+    if not segs or not img_h:
+        return segs, []
+    top = edge_frac * img_h
+    out, bridged = [list(segs[0])], []
+    for s, e in segs[1:]:
+        ps, pe = out[-1]
+        gap_ok = (s - pe) <= max_gap_s * fps
+        clean = not any(pe < c <= s for c in cuts) and bool(wide[pe:s + 1].all())
+        last_y = next((y[f] for f in range(pe, max(ps, pe - 4) - 1, -1) if not np.isnan(y[f])), None)
+        first_y = next((y[f] for f in range(s, min(e, s + 4) + 1) if not np.isnan(y[f])), None)
+        via_top = (last_y is not None and last_y < top) or (first_y is not None and first_y < top)
+        if gap_ok and clean and via_top:
+            out[-1][1] = e
+            bridged.append({"from": int(pe), "to": int(s)})
+        else:
+            out.append([s, e])
+    return [tuple(v) for v in out], bridged
+
+
+def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None, img_h=None):
     v, x, y = sh["v"], sh["x"], sh["y"]
     n = len(v)
     wide = view["wide"] if view is not None else np.ones(n, bool)
@@ -223,6 +248,8 @@ def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None):
     # A rally can't span a camera cut or leave the wide court view.
     breaks = sorted(cuts | set(np.flatnonzero(~wide).tolist()))
     segs = _split(_segments(v_eff, max_gap=int(params["rally_gap_s"] * fps)), breaks, v_eff)
+    segs, bridged = _bridge_top_exits(segs, x, y, cuts, wide, fps, img_h)
+    params["top_exit_gaps_bridged"] = len(bridged)
     # Where each wide-view stretch starts (video start or a cut back to the court).
     view_starts = [0] + [i for i in range(1, n) if wide[i] and (not wide[i - 1] or i in cuts)]
     for s, e in segs:

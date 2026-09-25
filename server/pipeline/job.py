@@ -207,7 +207,7 @@ def _analyse(vid):
     # Racket hand per player slot (0 near1, 1 near2, 2 far1, 3 far2), set by the user.
     hands_cfg = (read_json(vid, "review.json", {}) or {}).get("hands", {})
     hands = {i: hands_cfg[k] for i, k in enumerate(("near1", "near2", "far1", "far2")) if k in hands_cfg}
-    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode, vw, hands)
+    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode, vw, hands, img_h=meta["h"])
     done(S3)
 
     write_json(vid, "players.json", {str(f): [[p["id"], 0 if p["side"] == "near" else 1, *p["box"],
