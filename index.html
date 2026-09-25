@@ -213,15 +213,21 @@ textarea#csvOut{width:100%;height:140px;font:12px ui-monospace,Consolas,monospac
 <script>
 const KEY='rallybook-v1', TABKEY='rallybook-tab';
 const OUT={winner:'Winner',forced:'Forced error',unforced:'Unforced error',serve:'Service fault'};
-const SHOT={smash:'Smash',kill:'Net kill',drop:'Drop',net:'Net shot',clear:'Clear',drive:'Drive',lift:'Lift'};
-const SHOT_ALL={...SHOT,serve:'Serve'};
+// ShuttleSet's 18 shot types, in the dataset's order and wording.
+const SHOT_TYPES=['net shot','return net','smash','wrist smash','lob','defensive return lob','clear','drive','driven flight',
+  'back-court drive','drop','passive drop','push','rush','defensive return drive','cross-court net shot','short service','long service'];
+const SHOT=Object.fromEntries(SHOT_TYPES.map(t=>[t,t.charAt(0).toUpperCase()+t.slice(1)]));
+const SHOT_ALL=SHOT;
+// Shot tags saved before the switch to ShuttleSet names.
+const LEGACY_SHOT={kill:'rush',lift:'lob',net:'net shot',smash:'smash',drop:'drop',clear:'clear',drive:'drive',serve:null};
+function migrate(m){if(m&&m.rallies)m.rallies.forEach(r=>{if(r.shot&&!(r.shot in SHOT))r.shot=LEGACY_SHOT[r.shot]??null});return m}
 const LEN={s:'1–4 shots',m:'5–9 shots',l:'10+ shots'};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SHUTTLE='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10 L2 2 H14 L12 10 Z" fill="none" stroke="currentColor" stroke-width="1.3"/><ellipse cx="8" cy="12" rx="3.6" ry="2.6" fill="var(--cork)"/></svg>';
 
 let M=load(), tag={outcome:null,shot:null,len:null}, tab='score', gf='all', setupOpen=false;
-if(!M) M=sampleMatch();
+
 try{tab=localStorage.getItem(TABKEY)||'score'}catch(e){}
 
 function save(){try{localStorage.setItem(KEY,JSON.stringify(M))}catch(e){}}
@@ -283,15 +289,15 @@ function sampleMatch(){
   const R=rng(11), m={cfg:{mode:'singles',teams:[['Jun Hao'],['Marcus']],firstServe:0,points:21,bestOf:3},rallies:[],sample:true};
   for(let i=0;i<220;i++){
     const st=replay(m); if(st.over) break;
-    if(R()<0.035){m.rallies.push({winner:1-st.server,outcome:'serve',shot:'serve',len:'s'});continue}
+    if(R()<0.035){m.rallies.push({winner:1-st.server,outcome:'serve',shot:null,len:'s'});continue}
     const len=pick(R,{s:4,m:4,l:2.2});
     // Jun Hao attacks well in short rallies; Marcus is steadier in long ones.
     const pA=0.5+(len==='s'?0.1:len==='l'?-0.16:0.02)+(st.server===0?0.02:-0.02);
     const w=R()<pA?0:1;
     const outcome=w===0?pick(R,{winner:5,unforced:2.2,forced:2.5}):pick(R,{winner:3,unforced:3.6,forced:3});
     let shot;
-    if(outcome==='winner') shot=w===0?pick(R,{smash:5,kill:2.5,drop:1.5,drive:1}):pick(R,{drop:3,net:2.5,smash:2,clear:1.5,drive:1.2});
-    else shot=w===0?pick(R,{net:3,clear:2.5,lift:2,drive:1.5,drop:1}):pick(R,{smash:3.2,net:2,drive:2,drop:1.2,clear:1});
+    if(outcome==='winner') shot=w===0?pick(R,{smash:5,rush:2.5,drop:1.5,'wrist smash':1,drive:1}):pick(R,{drop:3,'net shot':2.5,smash:2,clear:1.5,'cross-court net shot':1,drive:1.2});
+    else shot=w===0?pick(R,{'net shot':3,clear:2.5,lob:2,drive:1.5,drop:1,push:1}):pick(R,{smash:3.2,'net shot':2,drive:2,drop:1.2,clear:1,'wrist smash':1});
     const tagged=R()>0.08;
     m.rallies.push({winner:w,outcome:tagged?outcome:null,shot:tagged?shot:null,len:tagged||R()>0.5?len:null});
   }
@@ -624,7 +630,7 @@ function point(t){
   if(replay(M).over) return;
   const r={winner:t};
   if(tag.outcome)r.outcome=tag.outcome;
-  if(tag.shot||tag.outcome==='serve')r.shot=tag.outcome==='serve'?'serve':tag.shot;
+  if(tag.shot&&tag.outcome!=='serve')r.shot=tag.shot;   // a service fault has no ShuttleSet shot type
   if(tag.len)r.len=tag.len;
   M.rallies.push(r); tag={outcome:null,shot:null,len:null}; save(); render(); keepAwake();
 }
@@ -668,6 +674,8 @@ document.addEventListener('keydown',e=>{
   if(tab!=='score'||setupOpen) return;
   if(e.key==='1')point(0); else if(e.key==='2')point(1); else if(e.key==='u'||e.key==='U')undo();
 });
+// Build the sample match only now: it uses helpers defined further up the script.
+if(!M) M=sampleMatch(); else migrate(M);
 render();
 </script>
 
