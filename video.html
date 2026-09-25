@@ -117,6 +117,30 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 .field input,.field select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .kbd{font-size:12px;color:var(--muted)}
+.lab{display:flex;flex-direction:column;gap:14px;margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+.labhead{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.labhead p{margin:0;flex:1;min-width:240px}
+.labtiles{grid-template-columns:repeat(6,minmax(0,1fr))}
+@media (max-width:1100px){.labtiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.labtiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.labtiles .v{font-size:24px}
+.labgrid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px}
+@media (max-width:1000px){.labgrid{grid-template-columns:1fr}}
+.chart{width:100%;display:block;cursor:pointer}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.tbl-wrap{overflow-x:auto}
+table.t{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+table.t th{position:sticky;top:0;background:var(--surface);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:left;padding:4px 8px 6px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+table.t td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+#shotTbl tr{cursor:pointer}
+#shotTbl tr.cur td{background:var(--surface-2)}
+.cell{display:flex;align-items:center;gap:6px}
+.cell .bar{height:8px;border-radius:2px;flex:none;background:none}
+.cell .bar.a{background:var(--a)} .cell .bar.b{background:var(--b)}
+.maprow{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.maprow .map{width:200px;flex:none;margin:0}
+details.panel summary{cursor:pointer}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:99px;font-size:14px;z-index:10}
 </style>
 </head>
@@ -327,7 +351,7 @@ let R=null; // {res, players, review, sel, show}
 async function renderReview(v){
   const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
   const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
-  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,players:true,hits:true},v,names:loadNames()};
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:loadNames()};
   const meta=res.meta;
   $('#app').innerHTML=`<div class="ws">
     <div class="col">
@@ -337,7 +361,7 @@ async function renderReview(v){
         <label class="small row" style="gap:6px"><input type="checkbox" id="loop"> Stop at end of rally</label>
         <span class="kbd num" id="tc" style="margin-left:auto">0:00</span>
       </div>
-      <div class="toggles">${Object.keys(R.show).map(k=>`<button class="chip" data-show="${k}" aria-pressed="true">${{court:'Court lines',shuttle:'Shuttle trail',players:'Players',hits:'Hits'}[k]}</button>`).join('')}</div>
+      <div class="toggles">${Object.keys(R.show).map(k=>`<button class="chip" data-show="${k}" aria-pressed="${R.show[k]}">${{court:'Court lines',shuttle:'Shuttle trail',raw:'Raw TrackNet points',players:'Player skeletons',labels:'Labels & speed',hits:'Hits & landing'}[k]}</button>`).join('')}</div>
       <div class="tiles" id="tiles"></div>
       <div class="panel" id="detail"></div>
     </div>
@@ -355,7 +379,8 @@ async function renderReview(v){
       </div>
       <div class="panel"><h2 class="sec">Landing spots</h2><div id="mini"></div></div>
       <div class="panel"><h2 class="sec">Rallies</h2><ol class="rl" id="rl"></ol></div>
-    </div></div>`;
+    </div></div>
+    <section class="lab" id="lab"></section>`;
   const vid=$('#vid'), ctx=sizeCanvas(meta);
   R.vid=vid;R.ctx=ctx;
   api('/videos/'+S.vid+'/players.json').then(p=>{R.players=p;drawOverlay()}).catch(()=>{});
@@ -373,17 +398,17 @@ async function renderReview(v){
   };
   const tick=()=>{drawOverlay();if(R&&R.vid===vid){vid.requestVideoFrameCallback?vid.requestVideoFrameCallback(tick):requestAnimationFrame(tick)}};
   tick(); vid.addEventListener('seeked',drawOverlay);
-  renderTiles();renderList();renderMini();renderDetail();
+  renderTiles();renderList();renderMini();renderDetail();renderLab();
 }
 function loadNames(){try{return JSON.parse(localStorage.getItem('rallybook-names-'+S.vid))||{near:'Near player',far:'Far player'}}catch(e){return{near:'Near player',far:'Far player'}}}
 function saveNames(){try{localStorage.setItem('rallybook-names-'+S.vid,JSON.stringify(R.names))}catch(e){}}
 const nm=side=>esc(R.names[side]||side);
 const winnerOf=r=>R.ov[r.i]?.winner??r.winner_side;       // 'near' | 'far' | 'skip'
-const HOW={winner:'landed in',out:'landed out',net:"didn't cross the net"};
+const HOW={winner:'landed in',out:'landed out',net:"didn't cross the net",unknown:'was lost from view, so the winner is unknown'};
 
 function renderTiles(){
   const rs=R.res.rallies.filter(r=>winnerOf(r)!=='skip');
-  const pts={near:0,far:0};rs.forEach(r=>pts[winnerOf(r)]++);
+  const pts={near:0,far:0};rs.forEach(r=>{const w=winnerOf(r);if(w in pts)pts[w]++});
   const shots=rs.map(r=>r.shots), avg=shots.length?(shots.reduce((a,b)=>a+b,0)/shots.length).toFixed(1):'–';
   const longest=rs.reduce((m,r)=>r.shots>(m?.shots||0)?r:m,null);
   $('#tiles').innerHTML=`
@@ -397,7 +422,7 @@ function renderList(){
     const w=winnerOf(r), corrected=R.ov[r.i]?.winner!=null;
     return `<li data-r="${r.i}" class="${R.sel===r.i?'sel':''} ${w==='skip'?'ignored':''}">
       <span class="n">${r.i+1}</span>
-      <div><div class="l1">${w==='skip'?'Not a rally':`<span class="${w==='near'?'ca':'cb'}">${nm(w)}</span> wins`} <span class="muted">· ${r.shots} shots · ${r.duration.toFixed(1)} s</span></div>
+      <div><div class="l1">${w==='skip'?'Not a rally':w==null?'<b>Winner unknown</b>, pick one':`<span class="${w==='near'?'ca':'cb'}">${nm(w)}</span> wins`} <span class="muted">· ${r.shots} shots · ${r.duration.toFixed(1)} s</span></div>
       <div class="l2">${fmtT(r.t0)} · ${corrected?'corrected by you':`last shot ${HOW[r.how]}${r.confidence==='low'?' · unsure':''}`}</div>
       <div class="win">${['near','far','skip'].map(k=>`<button class="${k}" data-win="${k}" data-ri="${r.i}" aria-pressed="${w===k}">${k==='skip'?'Ignore':nm(k)}</button>`).join('')}</div></div></li>`}).join('')||'<p class="muted small">No rallies found. Check the court corners and camera angle.</p>';
 }
@@ -408,7 +433,7 @@ function renderMini(){
   let s=`<svg viewBox="-0.6 -0.6 7.3 14.6" class="mini" role="img" aria-label="Landing spots on the court"><rect class="mat" x="0" y="0" width="6.1" height="13.4"/>`;
   for(const[a,b,c,d]of COURT_LINES) s+=`<line class="cl" x1="${a}" y1="${Y(b)}" x2="${c}" y2="${Y(d)}"/>`;
   s+=`<line class="net" x1="-.3" y1="${Y(NET)}" x2="6.4" y2="${Y(NET)}"/>`;
-  rs.forEach(r=>{const w=winnerOf(r);if(w==='skip')return;const[x,y]=r.landing.court;if(x<-1||x>7.1||y<-1||y>14.4)return;
+  rs.forEach(r=>{const w=winnerOf(r);if(w==='skip')return;if(!r.landing.court)return;const[x,y]=r.landing.court;if(x<-1||x>7.1||y<-1||y>14.4)return;
     s+=`<circle class="ld ld-${w} ${sel&&sel!==r?'dim':''}" cx="${x.toFixed(2)}" cy="${Y(y).toFixed(2)}" r="${sel===r?.2:.13}"><title>Rally ${r.i+1}</title></circle>`});
   if(sel){
     const hp=sel.hits.filter(h=>h.court).map(h=>[h.court[0],Y(h.court[1])]);
@@ -423,13 +448,13 @@ function renderDetail(){
   if(!r){$('#detail').innerHTML=`<h2 class="sec">Rally detail</h2><p class="small muted" style="margin:0">Pick a rally from the list, or press ] to jump to the next one.</p>`;return}
   const mv=r.movement.filter(m=>m.metres>0.5).map(m=>`<span class="${m.side==='near'?'ca':'cb'}">${m.side==='near'?nm('near'):nm('far')}${R.res.mode==='doubles'?' #'+m.id:''}</span> ${m.metres} m`).join(' · ');
   $('#detail').innerHTML=`<h2 class="sec">Rally ${r.i+1}</h2>
-    <p style="margin:0 0 8px">${nm(r.server_side)} served. ${r.shots} shots in ${r.duration.toFixed(1)} s (${(r.shots/r.duration).toFixed(1)} shots per second). The last shot ${HOW[r.how]}${r.landing.in||r.how==='net'?'':' at '+fmtLand(r.landing.court)}.</p>
+    <p style="margin:0 0 8px">${nm(r.server_side)} served. ${r.shots} shots in ${r.duration.toFixed(1)} s (${(r.shots/r.duration).toFixed(1)} shots per second). The last shot ${HOW[r.how]}${r.how==='out'?' at '+fmtLand(r.landing.court):''}.</p>
     <div class="small muted">Distance covered: ${mv||'not enough player data'}</div>
     <div class="row small" style="margin-top:8px;gap:6px">${r.hits.map((h,k)=>`<button class="chip" data-seek="${h.f}">${k+1}. <span class="${h.side==='near'?'ca':'cb'}">${h.side==='near'?nm('near'):nm('far')}</span> ${fmtT(h.f/R.res.meta.fps)}</button>`).join('')}</div>`;
 }
 function fmtLand([x,y]){const w=x<0?`${(-x).toFixed(1)} m wide`:x>CL?`${(x-CL).toFixed(1)} m wide`:'';const l=y<0?`${(-y).toFixed(1)} m long`:y>CLEN?`${(y-CLEN).toFixed(1)} m long`:'';return[w,l].filter(Boolean).join(', ')||'the line'}
 function select(i,seek=true){
-  R.sel=i;renderList();renderMini();renderDetail();
+  R.sel=i;renderList();renderMini();renderDetail();renderLabRally();
   if(seek){R.vid.currentTime=Math.max(0,R.res.rallies[i].t0-1);R.vid.play()}
   const li=document.querySelector(`#rl li[data-r="${i}"]`);li&&li.scrollIntoView({block:'nearest'});
 }
@@ -466,7 +491,17 @@ function drawOverlay(){
       ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.strokeRect(p[2],p[3],p[4]-p[2],p[5]-p[3]);
       ctx.lineWidth=lw*1.2;
       for(const[a,b]of SKEL){const ax=k[a*2],ay=k[a*2+1],bx=k[b*2],by=k[b*2+1];if(ax<0||bx<0)continue;ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke()}
+      if(R.show.labels){
+        const t=slotName(p[0]);ctx.font=`600 ${lw*7}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(t).width;
+        ctx.fillStyle=col;ctx.fillRect(p[2],p[3]-lw*11,tw+lw*6,lw*10);ctx.fillStyle='#fff';ctx.fillText(t,p[2]+lw*3,p[3]-lw*3.5);
+      }
     }
+  }
+  if(R.show.raw&&res.shuttle.raw_x){
+    const rx=res.shuttle.raw_x[f],ry=res.shuttle.raw_y[f];
+    if(rx!=null){ctx.strokeStyle='#39e1ff';ctx.lineWidth=lw;ctx.beginPath();ctx.arc(rx,ry,lw*6,0,7);ctx.stroke()}
+    if(labSets&&labSets.outlier.has(f)){ctx.fillStyle='#ff5a4a';ctx.font=`700 ${lw*9}px IBM Plex Sans, sans-serif`;ctx.fillText('outlier removed',lw*10,H-lw*10)}
+    else if(labSets&&labSets.filled.has(f)){ctx.fillStyle='#ffd23c';ctx.font=`700 ${lw*9}px IBM Plex Sans, sans-serif`;ctx.fillText('gap filled (interpolated)',lw*10,H-lw*10)}
   }
   if(R.show.shuttle){
     const xs=res.shuttle.x, ys=res.shuttle.y, n=Math.round(meta.fps*0.5);
@@ -475,6 +510,11 @@ function drawOverlay(){
       ctx.strokeStyle=`rgba(255,196,60,${0.15+0.85*(1-(f-i)/n)})`;ctx.lineWidth=lw*1.6;ctx.beginPath();ctx.moveTo(xs[i-1],ys[i-1]);ctx.lineTo(xs[i],ys[i]);ctx.stroke();
     }
     if(xs[f]!=null){ctx.fillStyle='#ffd23c';ctx.strokeStyle='#000';ctx.lineWidth=lw*.8;ctx.beginPath();ctx.arc(xs[f],ys[f],lw*3.2,0,7);ctx.fill();ctx.stroke()}
+    if(R.show.labels&&xs[f]!=null&&xs[f-2]!=null){
+      const sp=Math.hypot(xs[f]-xs[f-2],ys[f]-ys[f-2])/2*meta.fps;   // image px per second
+      const t=`${Math.round(sp)} px/s`;ctx.font=`600 ${lw*7}px IBM Plex Sans, sans-serif`;
+      ctx.fillStyle='rgba(0,0,0,.6)';const tw=ctx.measureText(t).width;ctx.fillRect(xs[f]+lw*6,ys[f]-lw*12,tw+lw*6,lw*10);ctx.fillStyle='#ffd23c';ctx.fillText(t,xs[f]+lw*9,ys[f]-lw*4.5);
+    }
   }
   const r=res.rallies.find(r=>f>=r.start-5&&f<=r.end+Math.round(meta.fps));
   if(r&&R.show.hits){
@@ -492,13 +532,16 @@ function drawOverlay(){
     const idx=r.hits.filter(h=>h.f<=f).length, txt=`Rally ${r.i+1} · shot ${idx}/${r.shots}`;
     ctx.font=`600 ${lw*9}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(txt).width;
     ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(lw*6,lw*6,tw+lw*12,lw*16);ctx.fillStyle='#fff';ctx.fillText(txt,lw*12,lw*18);
-    if(R.sel!==r.i&&!vid.paused){R.sel=r.i;renderList();renderMini();renderDetail()}
+    if(R.sel!==r.i&&!vid.paused){R.sel=r.i;renderList();renderMini();renderDetail();renderLabRally()}
   }
+  labTick(f);
 }
 
 function sendToScorebook(){
-  const rs=R.res.rallies.filter(r=>winnerOf(r)!=='skip');
-  if(!rs.length){toast('No rallies to send');return}
+  const unknown=R.res.rallies.filter(r=>winnerOf(r)==null).length;
+  const rs=R.res.rallies.filter(r=>winnerOf(r)==='near'||winnerOf(r)==='far');
+  if(!rs.length){toast(unknown?'Pick a winner for each rally first':'No rallies to send');return}
+  if(unknown){toast(`Skipped ${unknown} rall${unknown>1?'ies':'y'} with no winner picked`)}
   const team=s=>s==='near'?0:1, dbl=R.res.mode==='doubles';
   const name=s=>(R.names[s]||s).trim();
   const teams=dbl?[[name('near')+' 1',name('near')+' 2'],[name('far')+' 1',name('far')+' 2']]:[[name('near')],[name('far')]];
@@ -520,6 +563,217 @@ function sendToScorebook(){
     rallies,sample:false,source:{video:S.vid}};
   try{localStorage.setItem('rallybook-v1',JSON.stringify(M));localStorage.setItem('rallybook-tab','analysis')}catch(e){toast('Could not save to the Scorebook');return}
   location.href='index.html';
+}
+
+/* ------------------------------------------------------------ tracking lab */
+// Shows every signal the pipeline measured and the thresholds it used, synced to the video.
+const SLOTS=['Near 1','Near 2','Far 1','Far 2'];
+const slotName=id=>R.res.mode==='singles'?(id<2?R.names.near||'Near':R.names.far||'Far'):(SLOTS[id]??'#'+id);
+let labSets=null, LAB={win:'around',lastShot:-1,base:null};
+const tok=k=>getComputedStyle(document.documentElement).getPropertyValue('--'+k).trim();
+const pct=(a,b)=>b?Math.round(a/b*100)+'%':'–';
+
+function renderLab(){
+  const res=R.res, el=$('#lab');
+  if(!res.pipeline){
+    el.innerHTML=`<div class="panel"><h2 class="sec">Tracking lab</h2><p class="small">This video was analysed with an older version that didn't keep the tracking details. <button class="btn" id="rerun">Re-run analysis</button></p></div>`;
+    $('#rerun').onclick=rerun;return;
+  }
+  labSets={outlier:new Set(res.shuttle.outlier),filled:new Set(res.shuttle.filled)};
+  const P=res.pipeline, sh=P.shuttle, pl=P.players, n=res.meta.frames;
+  const hits=res.rallies.reduce((a,r)=>a+r.shots,0), wob=res.rallies.reduce((a,r)=>a+(r.signal.wobbles.length/2),0), weak=res.rallies.reduce((a,r)=>a+r.signal.below_threshold.length,0);
+  const kept=res.candidates.filter(c=>c.kept).length;
+  const secs=Object.values(P.timings_s).reduce((a,b)=>a+b,0);
+  const tile=(k,v,sub)=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="small muted">${sub}</div></div>`;
+  el.innerHTML=`
+  <div class="labhead"><h2 class="sec" style="font-size:18px;color:var(--ink)">Tracking lab</h2>
+    <p class="small muted">Everything the pipeline measured and the rules it used to decide. The charts follow the video. Click any chart to jump there.</p>
+    <button class="btn" id="rerun" title="Re-runs rally and hit detection. Tracking results are reused, so it's quick.">Re-run analysis</button></div>
+  <div class="tiles labtiles">
+    ${tile('Shuttle found',pct(sh.detected,sh.frames),`TrackNetV3 saw it in ${sh.detected} of ${sh.frames} frames · ${pct(sh.detected_in_rallies,sh.rally_frames)} during rallies`)}
+    ${tile('Track cleaning',`${sh.gaps_filled} <span class="small muted">filled</span> · ${sh.outliers_removed} <span class="small muted">removed</span>`,`Gaps up to ${sh.max_gap_frames} frames interpolated. Jumps over ${Math.round(sh.outlier_jump_px)} px removed.`)}
+    ${tile('Players tracked',pct(pl.frames_with_player,n),`YOLO26 made ${pl.tracker_ids} track IDs, merged into ${pl.player_slots} player slots (expected ${pl.expected_players})`)}
+    ${tile('Rallies',`${kept} <span class="small muted">of ${res.candidates.length}</span>`,`${res.candidates.length-kept} shuttle-visible stretches rejected. See settings below.`)}
+    ${tile('Hits',hits,`${wob} wobble pairs removed · ${weak} turns under the threshold`)}
+    ${tile('Processing',secs?Math.round(secs)+' s':'cached',Object.entries(P.timings_s).map(([k,v])=>`${k.split(' (')[0].replace('Splitting rallies and finding hits','Rallies')}: ${P.cached[k.includes('shuttle')?'shuttle':k.includes('players')?'players':'x']?'cached':v+' s'}`).join(' · '))}
+  </div>
+  <div class="panel"><h3 class="sec">Coverage timeline <span class="muted small" style="text-transform:none;letter-spacing:0">(whole video)</span></h3>
+    <canvas id="tl" class="chart" height="150"></canvas>
+    <div class="legend"><span><i style="background:var(--cork)"></i>Shuttle detected</span><span><i style="background:var(--good)"></i>Kept after cleaning</span><span><i style="background:#e0b43a"></i>Gap filled</span><span><i style="background:var(--bad)"></i>Outlier removed</span><span><i style="background:var(--ink)"></i>Rally</span><span><i style="background:var(--line)"></i>Rejected stretch</span><span><i style="background:var(--a)"></i>Near</span><span><i style="background:var(--b)"></i>Far</span></div>
+  </div>
+  <div class="panel" id="sigPanel"></div>
+  <div class="labgrid">
+    <div class="panel" id="shotPanel"></div>
+    <div class="panel" id="mapPanel"></div>
+  </div>
+  <details class="panel" id="settings"><summary><b>Detection settings and rejected stretches</b></summary>${renderSettings()}</details>`;
+  $('#rerun').onclick=rerun;
+  $('#tl').onclick=e=>{const r=e.target.getBoundingClientRect(),x=(e.clientX-r.left)/r.width;const L=TL_LEFT/r.width;if(x<L)return;R.vid.currentTime=(x-L)/(1-L)*res.meta.duration};
+  document.querySelectorAll('#settings [data-seekf]').forEach(b=>b.onclick=()=>{R.vid.currentTime=+b.dataset.seekf/res.meta.fps});
+  LAB.base=null; drawTimelineBase(); renderLabRally();
+  new ResizeObserver(()=>{LAB.base=null;drawTimelineBase();labTick(Math.round(R.vid.currentTime*res.meta.fps),true)}).observe($('#tl'));
+}
+async function rerun(){
+  try{await api('/videos/'+S.vid+'/retry',{method:'POST'});toast('Re-running analysis…');openVideo(S.vid)}catch(e){toast(e.message)}
+}
+
+const TL_LEFT=118;
+const TL_ROWS=['Shuttle (raw)','After cleaning','Rallies','Hits','Near players','Far players'];
+function drawTimelineBase(){
+  const cv=$('#tl'); if(!cv) return;
+  const res=R.res, n=res.meta.frames, dpr=window.devicePixelRatio||1, W=cv.clientWidth, Hh=150;
+  cv.width=W*dpr; cv.height=Hh*dpr; const c=cv.getContext('2d'); c.scale(dpr,dpr);
+  const iw=W-TL_LEFT-4, rowH=20, top=8, X=f=>TL_LEFT+f/n*iw;
+  c.font='500 11px IBM Plex Sans, sans-serif'; c.fillStyle=tok('muted');
+  TL_ROWS.forEach((l,i)=>c.fillText(l,4,top+i*rowH+13));
+  // Per pixel column: fraction of frames with the thing present.
+  const cols=Math.max(1,Math.floor(iw)), per=n/cols;
+  const colFrac=test=>{const out=new Float32Array(cols);for(let k=0;k<cols;k++){let a=Math.floor(k*per),b=Math.max(a+1,Math.floor((k+1)*per)),s=0;for(let f=a;f<b;f++)s+=test(f)?1:0;out[k]=s/(b-a)}return out};
+  const band=(row,frac,color)=>{c.fillStyle=color;for(let k=0;k<cols;k++){if(frac[k]<=0)continue;c.globalAlpha=.25+.75*frac[k];c.fillRect(TL_LEFT+k,top+row*rowH+3,1.05,rowH-8)}c.globalAlpha=1};
+  const sh=res.shuttle;
+  band(0,colFrac(f=>sh.raw_x[f]!=null),tok('cork'));
+  band(1,colFrac(f=>sh.x[f]!=null&&!labSets.filled.has(f)),tok('good'));
+  band(1,colFrac(f=>labSets.filled.has(f)),'#e0b43a');
+  c.fillStyle=tok('bad');for(const f of sh.outlier)c.fillRect(X(f)-1,top+rowH+1,2,rowH-4);
+  for(const cd of res.candidates){c.fillStyle=cd.kept?tok('ink'):tok('line');c.fillRect(X(cd.start),top+2*rowH+3,Math.max(2,X(cd.end)-X(cd.start)),rowH-8)}
+  res.rallies.forEach(r=>{c.fillStyle=tok('bg');c.font='600 10px IBM Plex Sans, sans-serif';if(X(r.end)-X(r.start)>22)c.fillText('R'+(r.i+1),X(r.start)+3,top+2*rowH+13)});
+  for(const r of res.rallies)for(const h of r.hits){c.fillStyle=h.side==='near'?tok('a'):tok('b');c.fillRect(X(h.f)-.5,top+3*rowH+(h.side==='near'?rowH/2:3),1.5,rowH/2-4)}
+  if(res.counts){
+    const exp=res.mode==='singles'?1:2;
+    band(4,colFrac(f=>res.counts.near[f]>=exp),tok('a'));band(5,colFrac(f=>res.counts.far[f]>=exp),tok('b'));
+  }
+  LAB.base=c.getImageData(0,0,cv.width,cv.height);
+  LAB.tlGeom={X,top,rowH,dpr};
+}
+
+function rallyAt(f){return R.res.rallies.find(r=>f>=r.start-10&&f<=r.end+10)}
+function labRally(){return R.sel!=null?R.res.rallies[R.sel]:(rallyAt(Math.round(R.vid.currentTime*R.res.meta.fps))||R.res.rallies[0])}
+
+function renderLabRally(){
+  if(!R.res.pipeline||!$('#sigPanel')) return;
+  const r=labRally();
+  if(!r){$('#sigPanel').innerHTML='<p class="muted small">No rallies to chart.</p>';$('#shotPanel').innerHTML='';$('#mapPanel').innerHTML='';return}
+  const P=R.res.pipeline.analysis;
+  $('#sigPanel').innerHTML=`<div class="row" style="justify-content:space-between"><h3 class="sec" style="margin:0">Shuttle signal · Rally ${r.i+1}</h3>
+    <div class="toggles"><button class="chip" data-sigwin="around" aria-pressed="${LAB.win==='around'}">10 s around playhead</button><button class="chip" data-sigwin="rally" aria-pressed="${LAB.win==='rally'}">Whole rally</button></div></div>
+    <canvas id="sig" class="chart" height="230"></canvas>
+    <canvas id="spd" class="chart" height="90"></canvas>
+    <div class="legend"><span><i style="background:var(--muted)"></i>Raw TrackNet y</span><span><i style="background:var(--cork)"></i>Smoothed y</span><span><i style="background:var(--a)"></i>Near hit</span><span><i style="background:var(--b)"></i>Far hit</span><span>○ Turn below threshold</span><span style="color:var(--bad)">× Wobble removed</span><span>▢ Last sighting</span></div>
+    <p class="small muted" style="margin:8px 0 0;max-width:90ch">How hits are found: the chart shows the shuttle's height in the picture (up = toward the far end). A near-side hit sends it up the picture and a far-side hit sends it down, so every turning point is a possible hit. A turn counts if it's at least <b>${P.hit_prominence_px} px</b> (8% of the court's ${Math.round(P.court_height_px)} px height in the picture) and ${P.hit_min_gap_s} s after the previous one. A small up-and-down pair closer than ${P.wobble_gap_s} s is treated as tracker wobble, unless a player's wrist is within ${P.hand_near_px} px both times. The lower chart is the shuttle's speed across the picture.</p>`;
+  document.querySelectorAll('[data-sigwin]').forEach(b=>b.onclick=()=>{LAB.win=b.dataset.sigwin;renderLabRally()});
+  ['sig','spd'].forEach(id=>$('#'+id).onclick=e=>{const g=LAB.sigGeom;if(!g)return;const rr=e.target.getBoundingClientRect();const f=g.f0+((e.clientX-rr.left)-g.left)/g.iw*(g.f1-g.f0);R.vid.currentTime=Math.max(0,f/R.res.meta.fps)});
+  renderShotTable(r); renderCourtMap(r);
+  LAB.lastShot=-1; labTick(Math.round(R.vid.currentTime*R.res.meta.fps),true);
+}
+
+function renderShotTable(r){
+  const sm=r.shot_metrics, mx=Math.max(1,...sm.map(s=>s.avg_speed_kmh||0),...sm.map(s=>s.peak_speed_kmh||0));
+  const bar=(v,cls)=>v==null?'<span class="muted">–</span>':`<div class="cell"><span class="bar ${cls}" style="width:${Math.round(v/mx*50)}px"></span>${v}</div>`;
+  $('#shotPanel').innerHTML=`<h3 class="sec">Shot by shot · Rally ${r.i+1}</h3>
+    <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Size of the turning point in the height signal">Turn px</th></tr></thead>
+    <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
+      <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
+      <td class="num">${s.flight_s}s</td><td class="num">${s.distance_m??'–'}${s.distance_m!=null?' m':''}</td>
+      <td>${bar(s.avg_speed_kmh,h.side==='near'?'a':'b')}</td><td>${bar(s.peak_speed_kmh,h.side==='near'?'a':'b')}</td>
+      <td class="num">${s.arc_pct??'–'}${s.arc_pct!=null?'%':''}</td><td>${s.direction??'–'}</td><td class="num">${h.hand_dist_px??'–'}</td><td class="num">${h.prominence??'serve'}</td></tr>`}).join('')}</tbody></table></div>
+    <p class="small muted" style="margin:8px 0 0">*Peak speed comes from the shuttle's movement in the picture at the hitter's depth. It's only a rough guide, because the shuttle's height above the floor isn't known. Average speed uses the players' floor positions, so it's more reliable but underestimates curved flights.</p>`;
+  $('#shotTbl').onclick=e=>{const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
+}
+
+function renderCourtMap(r){
+  const Y=y=>CLEN-y, cols=[tok('a'),tok('a'),tok('b'),tok('b')];
+  let s=`<svg viewBox="-0.8 -0.8 7.7 15" class="mini map" role="img" aria-label="Player paths and hit positions"><rect class="mat" x="0" y="0" width="6.1" height="13.4"/>`;
+  for(const[a,b,c,d]of COURT_LINES) s+=`<line class="cl" x1="${a}" y1="${Y(b)}" x2="${c}" y2="${Y(d)}"/>`;
+  s+=`<line class="net" x1="-.3" y1="${Y(NET)}" x2="6.4" y2="${Y(NET)}"/>`;
+  for(const m of r.movement){ if(!m.path||m.path.length<2)continue;
+    s+=`<polyline points="${m.path.map(p=>p[0].toFixed(2)+','+Y(p[1]).toFixed(2)).join(' ')}" fill="none" stroke="${cols[m.id]||tok('muted')}" stroke-width=".05" stroke-opacity=".8" ${m.id%2?'stroke-dasharray=".15 .1"':''}/>`}
+  r.hits.forEach((h,k)=>{if(!h.court)return;s+=`<circle cx="${h.court[0].toFixed(2)}" cy="${Y(h.court[1]).toFixed(2)}" r=".12" fill="${tok('cork')}" stroke="${tok('court-line')}" stroke-width=".03"><title>Shot ${k+1}: ${slotName(h.player)}</title></circle>`});
+  if(r.landing.court){const[x,y]=r.landing.court;s+=`<path d="M${x-.2} ${Y(y)-.2}L${x+.2} ${Y(y)+.2}M${x+.2} ${Y(y)-.2}L${x-.2} ${Y(y)+.2}" stroke="${r.landing.in?'#4ee08a':'#ff5a4a'}" stroke-width=".08"/>`}
+  s+=`<g id="liveDots"></g></svg>`;
+  const shotsBy={};r.hits.forEach(h=>{if(h.player!=null)shotsBy[h.player]=(shotsBy[h.player]||0)+1});
+  const hand={};r.hits.forEach(h=>{if(h.player!=null&&h.hand_dist_px!=null)(hand[h.player]=hand[h.player]||[]).push(h.hand_dist_px)});
+  $('#mapPanel').innerHTML=`<h3 class="sec">Court map · Rally ${r.i+1}</h3>
+    <div class="maprow">${s}
+    <div style="min-width:0;flex:1"><table class="t"><thead><tr><th>Player</th><th>Ran</th><th>Top speed</th><th>Shots</th><th title="Median wrist-to-shuttle distance at contact">Hand px</th></tr></thead><tbody>
+      ${r.movement.slice().sort((a,b)=>a.id-b.id).map(m=>{const hd=(hand[m.id]||[]).sort((a,b)=>a-b);return `<tr><td><span style="color:${cols[m.id]}">■</span> ${slotName(m.id)}</td><td class="num">${m.metres} m</td><td class="num">${m.top_speed_ms} m/s</td><td class="num">${shotsBy[m.id]||0}</td><td class="num">${hd.length?hd[Math.floor(hd.length/2)]:'–'}</td></tr>`}).join('')||'<tr><td colspan="5" class="muted">No player data for this rally</td></tr>'}
+    </tbody></table>
+    <p class="small muted">Lines are each player's path on the floor (dashed = player 2). Gold dots mark where each shot was played. Big dots show where everyone is right now in the video. ${r.landing.court?'The cross marks where the rally ended.':'The shuttle was lost from view before it landed, so there is no landing mark.'}</p></div></div>`;
+}
+
+function labTick(f,force){
+  if(!R.res.pipeline||!LAB.base) return;
+  const res=R.res;
+  // Timeline playhead
+  const cv=$('#tl'); if(cv){const c=cv.getContext('2d');c.putImageData(LAB.base,0,0);const g=LAB.tlGeom;c.save();c.scale(g.dpr,g.dpr);c.strokeStyle=tok('ink');c.lineWidth=1.5;c.beginPath();c.moveTo(g.X(f),2);c.lineTo(g.X(f),148);c.stroke();c.restore()}
+  const r=labRally(); if(!r) return;
+  drawSignal(r,f);
+  // Highlight the current shot
+  let k=-1;for(let i=0;i<r.hits.length;i++)if(r.hits[i].f<=f)k=i;
+  if(k!==LAB.lastShot||force){LAB.lastShot=k;document.querySelectorAll('#shotTbl tr.cur').forEach(t=>t.classList.remove('cur'));const tr=document.querySelector(`#shotTbl tr[data-k="${k}"]`);if(tr){tr.classList.add('cur');if(!R.vid.paused)tr.scrollIntoView({block:'nearest'})}}
+  // Live player dots on the court map
+  const g=$('#liveDots'); if(g&&R.players){const ps=R.players[f]||R.players[f-1]||[];const cols=[tok('a'),tok('a'),tok('b'),tok('b')];
+    g.innerHTML=ps.map(p=>{const foot=[(p[2]+p[4])/2,p[5]];const[cx,cy]=apply(res.court.H,foot);return `<circle cx="${cx.toFixed(2)}" cy="${(CLEN-cy).toFixed(2)}" r=".22" fill="${cols[p[0]]}" stroke="${tok('court-line')}" stroke-width=".05"/>`}).join('')}
+}
+
+function drawSignal(r,f){
+  const cv=$('#sig'),cs=$('#spd'); if(!cv) return;
+  const res=R.res,fps=res.meta.fps,dpr=window.devicePixelRatio||1,W=cv.clientWidth;
+  let f0=r.start,f1=r.end;
+  if(LAB.win==='around'){const half=5*fps;f0=Math.max(r.start,Math.min(f-half,r.end-2*half));f1=Math.min(r.end,f0+2*half)}
+  const left=44,iw=W-left-8;
+  LAB.sigGeom={f0,f1,left,iw};
+  const X=fr=>left+(fr-f0)/Math.max(1,f1-f0)*iw;
+  // --- height signal
+  const Hh=230;cv.width=W*dpr;cv.height=Hh*dpr;const c=cv.getContext('2d');c.scale(dpr,dpr);
+  const sm=r.signal.y_smooth, raw=res.shuttle.raw_y;
+  const vals=[];for(let fr=f0;fr<=f1;fr++){const a=sm[fr-r.start];if(a!=null)vals.push(a);if(raw[fr]!=null)vals.push(raw[fr])}
+  const near=apply(res.court.Hinv,[3.05,0])[1],far=apply(res.court.Hinv,[3.05,CLEN])[1],net=apply(res.court.Hinv,[3.05,NET])[1];
+  let lo=Math.min(far,...vals)-10,hi=Math.max(near,...vals)+10;
+  const Yp=v=>8+(v-lo)/(hi-lo)*(Hh-26);   // image y grows downward, like the picture
+  c.font='500 10px IBM Plex Sans, sans-serif';
+  for(const[v,l]of[[far,'far baseline'],[net,'net (floor)'],[near,'near baseline']]){c.strokeStyle=tok('line');c.setLineDash([3,4]);c.beginPath();c.moveTo(left,Yp(v));c.lineTo(W-8,Yp(v));c.stroke();c.setLineDash([]);c.fillStyle=tok('muted');c.fillText(l,left+4,Yp(v)-3)}
+  c.fillStyle=tok('muted');c.textAlign='right';c.fillText('far ↑',left-6,14);c.fillText('near ↓',left-6,Hh-20);c.textAlign='left';
+  // x ticks every second
+  for(let s=Math.ceil(f0/fps);s<=f1/fps;s++){const x=X(s*fps);c.fillStyle=tok('muted');c.fillRect(x,Hh-16,1,4);if((f1-f0)/fps<25||s%5===0)c.fillText(fmtT(s),x-10,Hh-3)}
+  c.fillStyle=tok('muted');for(let fr=f0;fr<=f1;fr++){if(raw[fr]==null)continue;c.globalAlpha=.55;c.fillRect(X(fr)-1,Yp(raw[fr])-1,2,2)}c.globalAlpha=1;
+  for(const fr of res.shuttle.outlier){if(fr<f0||fr>f1)continue;c.fillStyle=tok('bad');c.fillRect(X(fr)-2,Yp(raw[fr])-2,4,4)}
+  c.strokeStyle=tok('cork');c.lineWidth=2;c.beginPath();let st=false;for(let fr=f0;fr<=f1;fr++){const a=sm[fr-r.start];if(a==null){st=false;continue}if(!st){c.moveTo(X(fr),Yp(a));st=true}else c.lineTo(X(fr),Yp(a))}c.stroke();
+  const yAt=fr=>sm[Math.min(sm.length-1,Math.max(0,fr-r.start))];
+  for(const b of r.signal.below_threshold){if(b.f<f0||b.f>f1)continue;c.strokeStyle=tok('muted');c.lineWidth=1.2;c.beginPath();c.arc(X(b.f),Yp(yAt(b.f)),4,0,7);c.stroke()}
+  for(const w of r.signal.wobbles){if(w.f<f0||w.f>f1)continue;const x=X(w.f),y=Yp(yAt(w.f));c.strokeStyle=tok('bad');c.lineWidth=1.6;c.beginPath();c.moveTo(x-4,y-4);c.lineTo(x+4,y+4);c.moveTo(x+4,y-4);c.lineTo(x-4,y+4);c.stroke()}
+  r.hits.forEach((h,k)=>{if(h.f<f0||h.f>f1)return;const x=X(h.f),y=Yp(yAt(h.f));c.fillStyle=h.side==='near'?tok('a'):tok('b');c.beginPath();c.arc(x,y,5,0,7);c.fill();
+    if((f1-f0)/fps<25){c.fillStyle=tok('ink');c.font='600 10px IBM Plex Sans, sans-serif';c.fillText(k+1,x-3,h.side==='near'?y+16:y-8)}});
+  const L=r.landing;if(L.f>=f0&&L.f<=f1){c.strokeStyle=tok('ink');c.lineWidth=1.5;c.strokeRect(X(L.f)-5,Yp(L.px[1])-5,10,10)}
+  c.strokeStyle=tok('ink');c.lineWidth=1.2;if(f>=f0&&f<=f1){c.beginPath();c.moveTo(X(f),4);c.lineTo(X(f),Hh-16);c.stroke()}
+  // --- speed
+  const Hs=90;cs.width=W*dpr;cs.height=Hs*dpr;const d=cs.getContext('2d');d.scale(dpr,dpr);
+  const sp=r.signal.speed_px_s;let mx=1;for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v>mx)mx=v}
+  const Ys=v=>Hs-14-(v/mx)*(Hs-24);
+  d.font='500 10px IBM Plex Sans, sans-serif';d.fillStyle=tok('muted');d.textAlign='right';d.fillText(Math.round(mx),left-6,14);d.fillText('px/s',left-6,26);d.fillText('0',left-6,Hs-12);d.textAlign='left';
+  d.strokeStyle=tok('line');d.beginPath();d.moveTo(left,Ys(0));d.lineTo(W-8,Ys(0));d.stroke();
+  d.beginPath();d.moveTo(X(f0),Ys(0));for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v!=null)d.lineTo(X(fr),Ys(v))}d.lineTo(X(f1),Ys(0));d.closePath();d.fillStyle=tok('cork');d.globalAlpha=.25;d.fill();d.globalAlpha=1;
+  d.strokeStyle=tok('cork');d.lineWidth=1.5;d.beginPath();st=false;for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v==null)continue;if(!st){d.moveTo(X(fr),Ys(v));st=true}else d.lineTo(X(fr),Ys(v))}d.stroke();
+  for(const h of r.hits){if(h.f<f0||h.f>f1)continue;d.fillStyle=h.side==='near'?tok('a'):tok('b');d.fillRect(X(h.f)-.5,Hs-12,1.5,8)}
+  if(f>=f0&&f<=f1){d.strokeStyle=tok('ink');d.beginPath();d.moveTo(X(f),2);d.lineTo(X(f),Hs-4);d.stroke()}
+}
+
+function renderSettings(){
+  const P=R.res.pipeline, A=P.analysis, S=P.shuttle;
+  const rows=[
+    ['Shuttle model','TrackNetV3 + InpaintNet','Heatmap tracker built for badminton. The inpainting net fills short occlusions.'],
+    ['Player model',P.players.model,'YOLO26 pose (17 keypoints) with ByteTrack. Only people within 1.2 m of the court are kept.'],
+    ['Gap filling',`≤ ${S.max_gap_frames} frames`,'Missing shuttle frames shorter than this are interpolated.'],
+    ['Outlier jump',`${Math.round(S.outlier_jump_px)} px`,'A single point that jumps this far from both neighbours is removed.'],
+    ['Rally gap',`${A.rally_gap_s} s`,'Losing the shuttle for longer than this ends a rally.'],
+    ['Minimum rally',`${A.min_rally_s} s, ${Math.round(A.min_visible_frac*100)}% seen, ${A.min_travel_courts} court lengths travelled`,'Stretches failing any of these are rejected (listed below).'],
+    ['Smoothing',`${A.smooth_window_frames} frames`,'Savitzky–Golay filter on the height signal before looking for turns.'],
+    ['Hit threshold',`${A.hit_prominence_px} px turn, ${A.hit_min_gap_s} s apart`,'8% of the court height in the picture.'],
+    ['Wobble filter',`< ${A.wobble_prominence_px} px within ${A.wobble_gap_s} s`,`Kept if a wrist is within ${A.hand_near_px} px of the shuttle for both turns.`],
+    ['Landing',`still for 0.1 s, moving < ${A.still_px} px`,'The final motionless stretch is the landing. A last sighting that projects off the court is marked unknown.'],
+  ];
+  return `<div class="tbl-wrap" style="margin-top:10px"><table class="t"><thead><tr><th>Setting</th><th>Value</th><th>What it does</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${r[0]}</b></td><td class="num">${esc(r[1])}</td><td class="muted">${r[2]}</td></tr>`).join('')}</tbody></table></div>
+  <h3 class="sec" style="margin-top:14px">Shuttle-visible stretches</h3>
+  <div class="tbl-wrap"><table class="t"><thead><tr><th>From</th><th>Length</th><th>Seen</th><th>Travel</th><th>Decision</th></tr></thead><tbody>${R.res.candidates.map(c=>`<tr><td><button class="chip" data-seekf="${c.start}">${fmtT(c.start/R.res.meta.fps)}</button></td><td class="num">${c.duration} s</td><td class="num">${Math.round(c.visible*100)}%</td><td class="num">${c.travel_courts} courts</td><td>${c.kept?'<span class="pill done">Rally</span>':`<span class="muted">${esc(c.reason)}</span>`}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 /* ------------------------------------------------------------ boot */

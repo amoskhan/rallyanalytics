@@ -63,15 +63,44 @@ def track(video_path, court: Court, n_frames, stride=1, imgsz=1280, on_progress=
     return out
 
 
+SLOT_NAMES = ["Near 1", "Near 2", "Far 1", "Far 2"]
+
+
 def select_players(frames, mode):
-    """Keep the most confident 1 (singles) or 2 (doubles) people per court half in each frame."""
+    """Keep the most confident 1 (singles) or 2 (doubles) people per court half in each frame,
+    and give each a stable slot (0-1 near, 2-3 far) instead of the tracker's ID, which
+    switches whenever players cross or overlap.
+
+    Slots are matched frame to frame by court position. In doubles, slot 1 starts as the
+    player on the left of the court from the camera's view.
+    """
+    from scipy.optimize import linear_sum_assignment
+
     per_side = 1 if mode == "singles" else 2
+    last = {"near": [None] * per_side, "far": [None] * per_side}
     kept = {}
-    for f, people in frames.items():
+    for f in sorted(frames):
         sel = []
-        for side in ("near", "far"):
-            cands = sorted((p for p in people if p["side"] == side), key=lambda p: -p["conf"])
-            sel += cands[:per_side]
+        for base, side in ((0, "near"), (2, "far")):
+            cands = sorted((p for p in frames[f] if p["side"] == side), key=lambda p: -p["conf"])[:per_side]
+            if not cands:
+                continue
+            if per_side == 1:
+                order = [0]
+            elif all(v is None for v in last[side]):
+                order = list(np.argsort([p["court"][0] for p in cands]))     # left to right
+                order = [int(np.where(np.array(order) == i)[0][0]) for i in range(len(cands))]
+            else:
+                prev = [v if v is not None else [3.05, 3.35 if side == "near" else 10.05] for v in last[side]]
+                cost = np.array([[np.hypot(p["court"][0] - q[0], p["court"][1] - q[1]) for q in prev] for p in cands])
+                rows, cols = linear_sum_assignment(cost)
+                order = [0] * len(cands)
+                for r_, c_ in zip(rows, cols):
+                    order[r_] = int(c_)
+            for p, slot in zip(cands, order):
+                q = dict(p, track=p["id"], id=base + slot, slot=SLOT_NAMES[base + slot])
+                last[side][slot] = p["court"]
+                sel.append(q)
         kept[f] = sel
     return kept
 

@@ -1,4 +1,5 @@
 """Video storage and the analysis job: normalise video -> shuttle -> players -> rallies."""
+import hashlib
 import json
 import os
 import queue
@@ -10,6 +11,7 @@ import traceback
 import uuid
 
 import cv2
+import numpy as np
 
 from . import analysis, players as players_mod, shuttle
 from .court import Court
@@ -31,11 +33,19 @@ def read_json(vid, name, default=None):
         return json.load(fh)
 
 
+def _np_default(o):
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
 def write_json(vid, name, obj):
     p = os.path.join(vdir(vid), name)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, separators=(",", ":"))
+        json.dump(obj, fh, separators=(",", ":"), default=_np_default)
     os.replace(tmp, p)
 
 
@@ -149,28 +159,77 @@ def _analyse(vid):
     court = Court(cfg["corners"])
     n, fps = meta["frames"], meta["fps"]
 
+    timings = {}
+
     # Weights of each stage in the overall progress bar.
     def stage(name, lo, hi):
         set_status(vid, state="analysing", stage=name, progress=lo)
+        timings[name] = time.time()
         return lambda p: set_status(vid, progress=round(lo + (hi - lo) * p, 3))
 
-    raw = shuttle.track(video, os.path.join(d, "shuttle"), stage("Tracking the shuttle (TrackNetV3)", 0.0, 0.6))
-    v, x, y = shuttle.clean(raw, n, width=meta["w"])
+    def done(name):
+        timings[name] = round(time.time() - timings[name], 1)
 
-    people = players_mod.track(video, court, n, stride=1, on_progress=stage("Finding players (YOLO26-pose)", 0.6, 0.95))
+    S1, S2, S3 = "Tracking the shuttle (TrackNetV3)", "Finding players (YOLO26-pose)", "Splitting rallies and finding hits"
+    shuttle_dir = os.path.join(d, "shuttle")
+    cached_shuttle = os.path.exists(shuttle.csv_path(shuttle_dir))
+    raw = shuttle.track(video, shuttle_dir, n, stage(S1, 0.0, 0.6))
+    done(S1)
+    sh = shuttle.clean(raw, n, width=meta["w"])
+
+    # Player tracking is cached per court calibration (the court decides who counts as a player).
+    key = hashlib.md5(json.dumps(cfg["corners"]).encode()).hexdigest()[:10]
+    cache = read_json(vid, "players_raw.json")
+    cached_players = bool(cache and cache.get("key") == key)
+    prog = stage(S2, 0.6, 0.95)
+    if cached_players:
+        people = {int(f): ps for f, ps in cache["frames"].items()}
+        prog(1.0)
+    else:
+        people = players_mod.track(video, court, n, stride=1, on_progress=prog)
+        write_json(vid, "players_raw.json", {"key": key, "frames": {str(f): ps for f, ps in people.items()}})
+    done(S2)
     mode = cfg.get("mode") if cfg.get("mode") in ("singles", "doubles") else players_mod.guess_mode(people)
     kept = players_mod.select_players(people, mode)
 
-    stage("Splitting rallies and finding hits", 0.95, 1.0)
-    rallies = analysis.find_rallies(v, x, y, kept, court, fps, mode)
+    stage(S3, 0.95, 1.0)
+    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode)
+    done(S3)
 
     write_json(vid, "players.json", {str(f): [[p["id"], 0 if p["side"] == "near" else 1, *p["box"],
                                               *[c for k in p["kps"] for c in ((k[0], k[1]) if k[2] > 0.3 else (-1, -1))]]
                                              for p in ps] for f, ps in kept.items() if ps})
+
+    def arr(a, ok):
+        return [None if not o else round(float(val), 1) for val, o in zip(a, ok)]
+
+    # Per-frame counts for the coverage timeline: detected people (all) and kept players per side.
+    counts = {"all": [len(people.get(f, [])) for f in range(n)],
+              "near": [sum(p["side"] == "near" for p in kept.get(f, [])) for f in range(n)],
+              "far": [sum(p["side"] == "far" for p in kept.get(f, [])) for f in range(n)]}
+    ids = {p["id"] for ps in kept.values() for p in ps}
+    tracker_ids = {p["track"] for ps in kept.values() for p in ps}
+    in_rally = np.zeros(n, bool)
+    for r in rallies:
+        in_rally[r["start"]:r["end"] + 1] = True
+    pipeline = {
+        "timings_s": timings, "cached": {"shuttle": cached_shuttle, "players": cached_players},
+        "shuttle": {"frames": n, "detected": int(sh["raw_v"].sum()), "after_cleaning": int(sh["v"].sum()),
+                    "outliers_removed": int(sh["outlier"].sum()), "gaps_filled": int(sh["filled"].sum()),
+                    "detected_in_rallies": int((sh["raw_v"] & in_rally).sum()), "rally_frames": int(in_rally.sum()),
+                    **sh["params"]},
+        "players": {"frames_with_player": int(sum(1 for f in range(n) if kept.get(f))),
+                    "tracker_ids": len(tracker_ids), "player_slots": len(ids), "expected_players": 2 if mode == "singles" else 4,
+                    "avg_detected_people": round(float(np.mean(counts["all"])), 2) if n else 0,
+                    "model": players_mod.DEFAULT_MODEL},
+        "analysis": params,
+    }
     write_json(vid, "result.json", {
-        "version": 1, "meta": meta, "mode": mode, "court": court.to_json(),
-        "shuttle": {"x": [None if not ok else round(float(a), 1) for a, ok in zip(x, v)],
-                    "y": [None if not ok else round(float(b), 1) for b, ok in zip(y, v)]},
+        "version": 2, "meta": meta, "mode": mode, "court": court.to_json(),
+        "shuttle": {"x": arr(sh["x"], sh["v"]), "y": arr(sh["y"], sh["v"]),
+                    "raw_x": arr(sh["raw_x"], sh["raw_v"]), "raw_y": arr(sh["raw_y"], sh["raw_v"]),
+                    "outlier": np.flatnonzero(sh["outlier"]).tolist(), "filled": np.flatnonzero(sh["filled"]).tolist()},
+        "counts": counts, "candidates": candidates, "pipeline": pipeline,
         "rallies": rallies, "summary": analysis.summarise(rallies),
     })
     set_status(vid, state="done", stage="Analysis complete", progress=1)
