@@ -276,7 +276,7 @@ function renderCourtSetup(v){
     <div class="col"><div class="panel">
       <p class="small" style="margin:0 0 6px"><a href="#">← All videos</a></p>
       <h2 class="sec">Mark the court</h2>
-      <p class="small" style="margin-top:0">Scrub to a frame where the court lines are clear, then click the <b>outer (doubles) court corners</b> in this order. "Near" is the end closest to the camera.</p>
+      <p class="small" style="margin-top:0">Pause on a frame where the court lines are clear, then <b>click directly on the video</b> at each <b>outer (doubles) court corner</b> in this order. "Near" is the end closest to the camera, at the bottom of the picture.</p>
       <ol class="steps" id="csteps">${CORNERS.map(c=>`<li>${c.replace('-',' ')}</li>`).join('')}</ol>
       <p class="small muted">The court lines appear once all 4 are placed. Check they sit on the real lines. Click <b>Reset</b> to redo them.</p>
       <div class="field" style="margin:10px 0"><span>Event</span><select id="mode"><option value="auto">Detect automatically</option><option value="singles">Singles</option><option value="doubles">Doubles</option></select></div>
@@ -295,8 +295,15 @@ function renderCourtSetup(v){
     }
     pts.forEach((p,i)=>{ctx.fillStyle='#ffd65a';ctx.strokeStyle='#000';ctx.lineWidth=lw;ctx.beginPath();ctx.arc(p[0],p[1],lw*5,0,7);ctx.fill();ctx.stroke();
       ctx.font=`600 ${lw*11}px IBM Plex Sans, sans-serif`;ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=lw*2.5;ctx.strokeText(CORNERS[i],p[0]+lw*8,p[1]-lw*8);ctx.fillText(CORNERS[i],p[0]+lw*8,p[1]-lw*8)});
+    if(pts.length<4){
+      const msg=`Click the ${CORNERS[pts.length].replace('-',' ').toUpperCase()} court corner on the video  (${pts.length+1} of 4)`;
+      ctx.font=`600 ${lw*10}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(msg).width;
+      ctx.fillStyle='rgba(0,0,0,.72)';ctx.fillRect((meta.w-tw)/2-lw*10,lw*8,tw+lw*20,lw*20);
+      ctx.fillStyle='#ffd65a';ctx.fillText(msg,(meta.w-tw)/2,lw*22);
+    }
     document.querySelectorAll('#csteps li').forEach((li,i)=>li.className=i<pts.length?'done':i===pts.length?'cur':'');
     $('#go').disabled=pts.length!==4;
+    $('#go').textContent=pts.length===4?'Analyse video':`Place ${4-pts.length} more corner${pts.length===3?'':'s'}`;
   };
   $('#cv').addEventListener('click',e=>{
     if(pts.length>=4) return;
