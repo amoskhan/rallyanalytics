@@ -81,11 +81,12 @@ def _hand_ratio(players, f, sx, sy):
     return best
 
 
-def _wrist_height(players, f, pid, k=2):
-    """Highest racket-wrist height of player pid within +-k frames of contact (see strokes.wrist_height)."""
+def _wrist_height(players, f, pid, hand=None, k=2):
+    """Highest racket-wrist height of player pid within +-k frames of contact (see strokes.wrist_height).
+    With the racket hand known ("R"/"L") only that wrist counts, not the free arm."""
     if pid is None:
         return None
-    vals = [strokes_mod.wrist_height(p) for g in range(f - k, f + k + 1) for p in players.get(g, []) if p["id"] == pid]
+    vals = [strokes_mod.wrist_height(p, hand) for g in range(f - k, f + k + 1) for p in players.get(g, []) if p["id"] == pid]
     vals = [v for v in vals if v is not None]
     return max(vals) if vals else None
 
@@ -181,7 +182,7 @@ def _split(segs, breaks, ok):
     return out
 
 
-def find_rallies(sh, players, court: Court, fps, mode, view=None):
+def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None):
     v, x, y = sh["v"], sh["x"], sh["y"]
     n = len(v)
     wide = view["wide"] if view is not None else np.ones(n, bool)
@@ -227,14 +228,15 @@ def find_rallies(sh, players, court: Court, fps, mode, view=None):
         joined = s - vs < int(0.5 * fps)
         after = e + 1
         cut_end = after < n and (after in cuts or not wide[min(n - 1, after + 2)] or any(c in cuts for c in range(after, after + 3)))
-        rallies.append(_analyse_rally(s, e, sh, players, court, fps, mode, params, joined, cut_end))
+        rallies.append(_analyse_rally(s, e, sh, players, court, fps, mode, params, joined, cut_end, hands or {}))
 
     for i, r in enumerate(rallies):
         r["i"] = i
     return rallies, candidates, params
 
 
-def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cut_end=False):
+def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cut_end=False, hands=None):
+    hands = hands or {}
     v, x, y = sh["v"], sh["x"], sh["y"]
     court_h = params["court_height_px"]
     land_f, settled = _landing_frame(x, y, s, e, fps, params["still_px"])
@@ -347,7 +349,8 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                      "player": hrec["pl"]["id"] if hrec["pl"] else None,
                      "court": hrec["pl"]["court"] if hrec["pl"] else None,
                      "hand_dist_px": hrec["hand_px"],
-                     "contact_h": _wrist_height(players, hrec["f"], hrec["pl"]["id"] if hrec["pl"] else None)})
+                     "contact_h": _wrist_height(players, hrec["f"], hrec["pl"]["id"] if hrec["pl"] else None,
+                                                hands.get(hrec["pl"]["id"]) if hrec["pl"] else None)})
     # Shots that must have happened but weren't seen:
     # - the shuttle was already flying when tracking began, so someone hit it;
     # - the same side twice with a long gap: the other side played in between

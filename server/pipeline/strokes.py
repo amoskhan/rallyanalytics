@@ -38,7 +38,7 @@ def zone(depth):
     return "front" if depth < FRONT else "rear" if depth > REAR else "mid"
 
 
-def wrist_height(player):
+def wrist_height(player, hand=None):
     """Height of the player's highest wrist: 0 = hips, 1 = nose, >1 above the head.
 
     Uses the body, not the shuttle: the shuttle's position in the picture depends on its
@@ -51,7 +51,9 @@ def wrist_height(player):
     kps = player["kps"]
     ok = lambda i: kps[i][2] > 0.3
     hips = [kps[i][1] for i in (11, 12) if ok(i)]
-    wrists = [kps[i][1] for i in (9, 10) if ok(i)]
+    # COCO keypoints are the player's own left (9) and right (10) wrist.
+    idx = (9,) if hand == "L" else (10,) if hand == "R" else (9, 10)
+    wrists = [kps[i][1] for i in idx if ok(i)]
     if not hips or not wrists:
         return None
     hip_y = sum(hips) / len(hips)

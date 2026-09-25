@@ -83,6 +83,9 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 #logTbl tr.future td{opacity:.4}
 #logTbl tr.cur td{background:var(--surface-2);font-weight:600}
 #logTbl tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--cork)}
+.namerow{display:flex;gap:6px}
+.namerow input{flex:1;min-width:0}
+select.handsel{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 4px;flex:none}
 .sdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
 select.strokesel{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 4px}
 select.strokesel.fixed{font-weight:600;background:var(--surface-2)}
@@ -330,13 +333,14 @@ function renderCourtSetup(v){
       <div class="row"><button class="btn" id="reset">Reset corners</button><button class="btn primary" id="go" disabled>Analyse video</button></div>
     </div></div></div>`;
   if(v.court&&v.court.mode) $('#mode').value=v.court.mode;
-  let setupNames=normNames(null);
-  api('/videos/'+S.vid+'/review').then(rv=>{setupNames=normNames(rv.names);drawNames()}).catch(()=>{});
+  let setupNames=normNames(null), setupHands={};
+  api('/videos/'+S.vid+'/review').then(rv=>{setupNames=normNames(rv.names);setupHands=rv.hands||{};drawNames()}).catch(()=>{});
   const drawNames=()=>{
     const dbl=$('#mode').value!=='singles';
-    const f=(k,l,c)=>`<label class="field"><span class="${c}" style="font-size:11px">${l}</span><input data-sname="${k}" value="${setupNames[k]===defaultName(k)?'':esc(setupNames[k])}" placeholder="${defaultName(k)}" maxlength="24"></label>`;
+    const f=(k,l,c)=>`<label class="field"><span class="${c}" style="font-size:11px">${l}</span><div class="namerow"><input data-sname="${k}" value="${setupNames[k]===defaultName(k)?'':esc(setupNames[k])}" placeholder="${defaultName(k)}" maxlength="24"><select class="handsel" data-shand="${k}" aria-label="Racket hand">${[['','Hand ?'],['R','Right'],['L','Left']].map(([v,t])=>`<option value="${v}"${(setupHands[k]||'')===v?' selected':''}>${t}</option>`).join('')}</select></div></label>`;
     $('#setupNames').innerHTML=f('near1',dbl?'Near 1':'Near','ca')+(dbl?f('near2','Near 2','ca'):'')+f('far1',dbl?'Far 1':'Far','cb')+(dbl?f('far2','Far 2','cb'):'');
     document.querySelectorAll('[data-sname]').forEach(i=>i.oninput=()=>{setupNames[i.dataset.sname]=i.value.trim()||defaultName(i.dataset.sname)});
+    document.querySelectorAll('[data-shand]').forEach(i=>i.onchange=()=>{if(i.value)setupHands[i.dataset.shand]=i.value;else delete setupHands[i.dataset.shand]});
   };
   $('#mode').onchange=drawNames; drawNames();
   const vid=$('#vid'), ctx=sizeCanvas(meta), stage=$('#stage'); stage.classList.add('picking');
@@ -372,7 +376,7 @@ function renderCourtSetup(v){
   vid.addEventListener('loadeddata',()=>{if(vid.currentTime===0)vid.currentTime=Math.min(3,meta.duration/2)},{once:true});
   $('#go').onclick=async()=>{
     $('#go').disabled=true;
-    try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({names:setupNames})});
+    try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({names:setupNames,hands:setupHands})});
       await api('/videos/'+S.vid+'/analyse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({corners:pts,mode:$('#mode').value})});openVideo(S.vid)}
     catch(e){toast(e.message);$('#go').disabled=false}
   };
@@ -384,9 +388,10 @@ let R=null; // {res, players, review, sel, show}
 async function renderReview(v){
   const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
   const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
-  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),strokesOv:Object.fromEntries(Object.entries(review.strokes||{}).map(([k,v])=>[k,LEGACY[v]||v])),live:{k:-2,r:-1}};
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),hands:review.hands||{},strokesOv:Object.fromEntries(Object.entries(review.strokes||{}).map(([k,v])=>[k,LEGACY[v]||v])),live:{k:-2,r:-1}};
   const meta=res.meta, dbl=res.mode==='doubles';
-  const nameField=(key,label,cls)=>`<div class="field"><span class="${cls}">${label}</span><input id="nm_${key}" data-name="${key}" value="${esc(R.names[key])}" maxlength="24"></div>`;
+  const handSel=(key)=>`<select class="handsel" data-hand="${key}" title="Racket hand" aria-label="Racket hand">${[['','Hand ?'],['R','Right'],['L','Left']].map(([v,l])=>`<option value="${v}"${(R.hands[key]||'')===v?' selected':''}>${l}</option>`).join('')}</select>`;
+  const nameField=(key,label,cls)=>`<div class="field"><span class="${cls}">${label}</span><div class="namerow"><input id="nm_${key}" data-name="${key}" value="${esc(R.names[key])}" maxlength="24">${handSel(key)}</div></div>`;
   $('#app').innerHTML=`<div class="ws review">
     <div class="col">
       ${stageBox(meta)}
@@ -415,7 +420,7 @@ async function renderReview(v){
       <div class="panel"><h2 class="sec">Court map</h2><div id="live"></div></div>
       <div class="panel"><h2 class="sec">Players</h2>
         <div class="pair">${nameField('near1',dbl?'Near 1':'Near','ca')}${dbl?nameField('near2','Near 2','ca'):''}${nameField('far1',dbl?'Far 1':'Far','cb')}${dbl?nameField('far2','Far 2','cb'):''}</div>
-        <p class="small muted" style="margin:6px 0 10px">${dbl?'Player 1 is the one on the left (from the camera) at the start of the video. If a name lands on the wrong player, swap the names.':'Near is the player closest to the camera at the start.'}</p>
+        <p class="small muted" style="margin:6px 0 10px">${dbl?'Player 1 is the one on the left (from the camera) at the start of the video. If a name lands on the wrong player, swap the names.':'Near is the player closest to the camera at the start.'} Racket hand makes contact height use the right wrist. Changing it re-runs the analysis (a few seconds).</p>
         <div id="playerStats"></div>
       </div>
       <div class="panel"><h2 class="sec">Strokes · this rally</h2><div id="strokeStats"></div></div>
@@ -428,6 +433,11 @@ async function renderReview(v){
   $('#prev').onclick=()=>step(-1);$('#next').onclick=()=>step(1);
   $('#recourt').onclick=e=>{e.preventDefault();renderCourtSetup({...v,meta})};
   document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{R.show[b.dataset.show]=!R.show[b.dataset.show];b.setAttribute('aria-pressed',R.show[b.dataset.show]);drawOverlay()});
+  document.querySelectorAll('[data-hand]').forEach(sel=>sel.onchange=async()=>{
+    if(sel.value)R.hands[sel.dataset.hand]=sel.value;else delete R.hands[sel.dataset.hand];
+    try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({hands:R.hands})});
+      await api('/videos/'+S.vid+'/retry',{method:'POST'});toast('Racket hand saved. Re-running the analysis…');openVideo(S.vid)}
+    catch(e){toast('Could not save: '+e.message)}});
   document.querySelectorAll('[data-name]').forEach(inp=>inp.oninput=()=>{R.names[inp.dataset.name]=inp.value.trim()||defaultName(inp.dataset.name);saveNames();renderTiles();renderList();renderDetail();renderRallyCard();renderPlayerStats(currentRally());renderShotLog(currentRally());R.live.k=-2;renderLabRally()});
   $('#toScore').onclick=()=>{$('#sendConfirm').hidden=false};
   $('#sendNo').onclick=()=>{$('#sendConfirm').hidden=true};
