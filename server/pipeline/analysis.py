@@ -170,7 +170,7 @@ def find_rallies(sh, players, court: Court, fps, mode, view=None):
     params = {
         "rally_gap_s": 0.8, "min_rally_s": 1.2, "min_visible_frac": 0.6, "min_travel_courts": 0.8,
         "contact_strong": 0.8, "contact_weak": 0.5, "hand_strong": 0.7, "hand_weak": 0.3, "hit_min_gap_s": 0.25,
-        "drag_turn_deg": 35,
+        "drag_turn_deg": 35, "missed_gap_s": 0.9,
         "smooth_window_frames": max(5, int(fps * 0.17) | 1), "still_px": round(still_px, 1),
         "court_height_px": round(court_h, 1),
     }
@@ -277,41 +277,59 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     still_start = len(xs) > k0 and np.hypot(xs[k0] - xs[0], ys[k0] - ys[0]) < 2 * params["still_px"]
     start_reason = "serve" if still_start else "joined mid-rally" if joined else "shuttle appeared"
 
-    # The same side can't play twice within DOUBLE_GAP: that's one contact seen twice.
-    # Drop the weaker, re-label, and repeat until none remain.
+    # Assign sides (shots alternate), credit each contact to the nearest player on that side,
+    # and re-check it with that player's hand. Contacts that only passed because the other
+    # team's hand overlapped the shuttle in the picture are dropped, and the same side twice
+    # within DOUBLE_GAP is one contact seen twice. Repeat until stable.
     DOUBLE_GAP = int(0.35 * fps)
+    slack = 1.3
     while True:
         sides = _assign_sides(kept, xs, ys, court, players, s)
-        dup = [t for t in range(1, len(kept))
-               if sides[t] == sides[t - 1] and kept[t]["i"] - kept[t - 1]["i"] <= DOUBLE_GAP]
-        if not dup:
+        drop, why = None, None
+        for t, hrec in enumerate(kept):
+            if hrec["pl"] is not None and hrec["pl"]["side"] != sides[t]:
+                own = {g: [q for q in players.get(g, []) if q["side"] == sides[t]] for g in range(hrec["f"] - 1, hrec["f"] + 2)}
+                ratio, _, pl, d_px = _hand_ratio(own, hrec["f"], float(xs[hrec["i"]]), float(ys[hrec["i"]]))
+                kept[t] = hrec = dict(hrec, pl=pl, hand_px=d_px, hand_ratio=_r(ratio if ratio < 9 else None))
+            r_ = hrec["hand_ratio"] if hrec["hand_ratio"] is not None else 9
+            # A weak snap only counted because a hand was right at the shuttle. If that hand
+            # was the other team's, re-check with the side that actually played it. (Sharp
+            # snaps stand on their own: in a smash the racket head is far from the wrist.)
+            if hrec["strength"] < params["contact_strong"] and r_ > params["hand_weak"] * slack:
+                drop, why = t, "weak, and no hand on the side that played it"
+                break
+            if t and sides[t] == sides[t - 1] and hrec["i"] - kept[t - 1]["i"] <= DOUBLE_GAP:
+                drop = t if hrec["strength"] <= kept[t - 1]["strength"] else t - 1
+                why = "same side twice within 0.35 s"
+                break
+        if drop is None or len(kept) <= 1:
             break
-        t = dup[0]
-        loser = t if kept[t]["strength"] <= kept[t - 1]["strength"] else t - 1
-        merged.append({"f": kept[loser]["f"], "side": sides[loser], "strength": kept[loser]["strength"],
-                       "reason": "same side twice within 0.35 s"})
-        del kept[loser]
+        merged.append({"f": kept[drop]["f"], "side": sides[drop], "strength": kept[drop]["strength"], "reason": why})
+        del kept[drop]
     hits = []
     for n_, hrec in enumerate(kept):
         i = hrec["i"]
         side = sides[n_]
-        if hrec["pl"] is not None and hrec["pl"]["side"] != side:
-            # The nearest hand belonged to the other team (they overlap in the picture):
-            # credit the closest player on the side that actually played it.
-            ratio, _, pl, d_px = _hand_ratio({k_: [q for q in v_ if q["side"] == side] for k_, v_ in
-                                               ((g, players.get(g, [])) for g in range(hrec["f"] - 1, hrec["f"] + 2))},
-                                              hrec["f"], float(xs[i]), float(ys[i]))
-            hrec = dict(hrec, pl=pl, hand_px=d_px, hand_ratio=_r(ratio if ratio < 9 else None))
         hits.append({"f": hrec["f"], "side": side, "px": [round(float(xs[i]), 1), round(float(ys[i]), 1)],
                      "strength": hrec["strength"], "hand_ratio": hrec["hand_ratio"],
                      "serve": n_ == 0 and start_reason == "serve",
                      "player": hrec["pl"]["id"] if hrec["pl"] else None,
                      "court": hrec["pl"]["court"] if hrec["pl"] else None,
                      "hand_dist_px": hrec["hand_px"]})
-    # Same side twice in a row with a normal gap: the other side's shot in between was missed.
-    missed = [{"f": (a["f"] + b["f"]) // 2, "after": a["f"], "before": b["f"], "side": OTHER[a["side"]]}
-              for a, b in zip(hits, hits[1:]) if a["side"] == b["side"]]
-    same_side = len(missed)
+    # Shots that must have happened but weren't seen:
+    # - the shuttle was already flying when tracking began, so someone hit it;
+    # - the same side twice with a long gap: the other side played in between
+    #   (typically a smash while the shuttle was above the top of the picture).
+    # The same side twice with a short gap is a side-labelling doubt, not a missed shot.
+    missed = []
+    if start_reason != "serve" and hits and hits[0]["f"] - s > int(0.12 * fps):
+        missed.append({"f": int(s), "after": None, "before": hits[0]["f"], "side": OTHER[hits[0]["side"]],
+                       "reason": "shuttle already in flight when tracking began"})
+    for a, b in zip(hits, hits[1:]):
+        if a["side"] == b["side"] and b["f"] - a["f"] >= int(params["missed_gap_s"] * fps):
+            missed.append({"f": (a["f"] + b["f"]) // 2, "after": a["f"], "before": b["f"], "side": OTHER[a["side"]],
+                           "reason": "same side twice: the other side's shot wasn't seen"})
+    same_side = sum(1 for a, b in zip(hits, hits[1:]) if a["side"] == b["side"])
     below = [{"f": r_["f"], "strength": r_["strength"], "hand_ratio": r_["hand_ratio"], "reason": r_["reason"]}
              for r_ in rejected if r_["reason"].startswith("too weak")]
     wobbles = [{"f": r_["f"], "strength": r_["strength"], "hand_ratio": r_["hand_ratio"], "reason": r_["reason"]}
