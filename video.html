@@ -78,6 +78,11 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 .rallycard .winner{font-family:var(--display);font-size:26px;font-weight:700;line-height:1.15;margin:6px 0 2px}
 .rallycard .winner span{font-size:16px;font-weight:500;color:var(--muted)}
 .rallycard .shotline{margin:8px 0 6px;font-size:18px}
+.tbl-wrap.log{max-height:260px;overflow:auto}
+#logTbl tr{cursor:pointer}
+#logTbl tr.future td{opacity:.4}
+#logTbl tr.cur td{background:var(--surface-2);font-weight:600}
+#logTbl tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--cork)}
 .sdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
 select.strokesel{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 4px}
 select.strokesel.fixed{font-weight:600;background:var(--surface-2)}
@@ -406,6 +411,7 @@ async function renderReview(v){
     </div>
     <aside class="col side">
       <div class="panel rallycard" id="rallyCard"></div>
+      <div class="panel"><h2 class="sec">Shot log</h2><div id="shotLog"></div></div>
       <div class="panel"><h2 class="sec">Court map</h2><div id="live"></div></div>
       <div class="panel"><h2 class="sec">Players</h2>
         <div class="pair">${nameField('near1',dbl?'Near 1':'Near','ca')}${dbl?nameField('near2','Near 2','ca'):''}${nameField('far1',dbl?'Far 1':'Far','cb')}${dbl?nameField('far2','Far 2','cb'):''}</div>
@@ -422,7 +428,7 @@ async function renderReview(v){
   $('#prev').onclick=()=>step(-1);$('#next').onclick=()=>step(1);
   $('#recourt').onclick=e=>{e.preventDefault();renderCourtSetup({...v,meta})};
   document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{R.show[b.dataset.show]=!R.show[b.dataset.show];b.setAttribute('aria-pressed',R.show[b.dataset.show]);drawOverlay()});
-  document.querySelectorAll('[data-name]').forEach(inp=>inp.oninput=()=>{R.names[inp.dataset.name]=inp.value.trim()||defaultName(inp.dataset.name);saveNames();renderTiles();renderList();renderDetail();renderRallyCard();renderPlayerStats(currentRally());R.live.k=-2;renderLabRally()});
+  document.querySelectorAll('[data-name]').forEach(inp=>inp.oninput=()=>{R.names[inp.dataset.name]=inp.value.trim()||defaultName(inp.dataset.name);saveNames();renderTiles();renderList();renderDetail();renderRallyCard();renderPlayerStats(currentRally());renderShotLog(currentRally());R.live.k=-2;renderLabRally()});
   $('#toScore').onclick=()=>{$('#sendConfirm').hidden=false};
   $('#sendNo').onclick=()=>{$('#sendConfirm').hidden=true};
   $('#sendYes').onclick=sendToScorebook;
@@ -490,6 +496,25 @@ const strokeFixed=(r,k)=>strokeKey(r,k) in R.strokesOv;
 const cap1=t=>t.charAt(0).toUpperCase()+t.slice(1);
 let strokeSave=null;
 function saveStrokes(){clearTimeout(strokeSave);strokeSave=setTimeout(()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({strokes:R.strokesOv})}).catch(e=>toast('Could not save: '+e.message)),300)}
+// Live shot log beside the video: played shots in full, the current one highlighted,
+// upcoming ones faded. Scrolls inside its own box so the page doesn't move.
+function renderShotLog(r){
+  const el=$('#shotLog'); if(!el) return;
+  if(!r){el.innerHTML='';return}
+  const fps=R.res.meta.fps, sm=r.shot_metrics||[];
+  el.innerHTML=`<div class="tbl-wrap log"><table class="t" id="logTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th>Stroke</th><th title="Average speed to the next contact">km/h</th></tr></thead><tbody>${r.hits.map((h,k)=>{const st=strokeOf(r,k),m=sm[k]||{};
+    return `<tr data-k="${k}" data-seekf="${h.f}" class="future"><td class="num">${k+1}</td><td class="num">${fmtT(h.f/fps)}</td><td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?esc(slotName(h.player)):(h.side==='near'?nm('near'):nm('far'))}</span></td><td><span class="sdot" style="background:${STROKE_COL[st]}"></span>${cap1(st)}${strokeFixed(r,k)?' <span class="muted">✓</span>':''}</td><td class="num">${m.avg_speed_kmh??'–'}</td></tr>`}).join('')}</tbody></table></div>
+  ${r.missed&&r.missed.length?`<p class="small muted" style="margin:6px 0 0">Plus ${r.missed.length} shot${r.missed.length>1?'s':''} the camera couldn't see (inferred, not listed).</p>`:''}`;
+  $('#logTbl').onclick=e=>{const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=Math.max(0,+tr.dataset.seekf/fps-0.3)}};
+  R.live.logK=-2;
+}
+function markShotLog(k){
+  if(R.live.logK===k) return; R.live.logK=k;
+  document.querySelectorAll('#logTbl tbody tr').forEach(tr=>{const i=+tr.dataset.k;tr.className=i<k?'':i===k?'cur':'future'});
+  const cur=document.querySelector('#logTbl tr.cur')||document.querySelector('#logTbl tbody tr');
+  if(cur) scrollWithin(cur);
+}
+
 function renderStrokeStats(r){
   const el=$('#strokeStats'); if(!el) return;
   if(!r||!r.shot_metrics||!r.shot_metrics[0]||r.shot_metrics[0].stroke==null){el.innerHTML='<p class="small muted" style="margin:0">Re-run the analysis to classify strokes.</p>';return}
@@ -550,7 +575,8 @@ function renderPlayerStats(r){
 function liveTick(f){
   const r=currentRally(); if(!r) return;
   let k=-1;for(let i=0;i<r.hits.length;i++)if(r.hits[i].f<=f)k=i;
-  if(R.live.r!==r.i){R.live.r=r.i;renderRallyCard();renderPlayerStats(r);renderStrokeStats(r)}
+  if(R.live.r!==r.i){R.live.r=r.i;renderRallyCard();renderPlayerStats(r);renderStrokeStats(r);renderShotLog(r)}
+  markShotLog(k);
   if(k!==R.live.k){R.live.k=k;renderLive(r,k);
     const now=$('#shotNow'),of=$('#shotOf');
     if(now){const total=r.shots_estimated??r.shots;now.textContent=k<0?'–':`Shot ${k+1}`;of.textContent=`of ${r.shots} seen${r.missed&&r.missed.length?` (${total} with inferred)`:''}`}}
@@ -805,7 +831,7 @@ function renderShotTable(r){
   $('#shotTbl').onchange=e=>{const sel=e.target.closest('select[data-stroke]');if(!sel)return;
     if(sel.value===sel.dataset.auto)delete R.strokesOv[sel.dataset.stroke];else R.strokesOv[sel.dataset.stroke]=sel.value;
     saveStrokes();sel.classList.toggle('fixed',sel.dataset.stroke in R.strokesOv);sel.style.borderLeftColor=STROKE_COL[sel.value];
-    const rr=labRally();renderStrokeStats(rr);R.live.k=-2;liveTick(Math.round(R.vid.currentTime*R.res.meta.fps));toast('Stroke saved')};
+    const rr=labRally();renderStrokeStats(rr);renderShotLog(currentRally());R.live.k=-2;liveTick(Math.round(R.vid.currentTime*R.res.meta.fps));toast('Stroke saved')};
   $('#shotTbl').onclick=e=>{if(e.target.closest('select'))return;const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
 }
 
