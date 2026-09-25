@@ -422,7 +422,7 @@ function renderList(){
     const w=winnerOf(r), corrected=R.ov[r.i]?.winner!=null;
     return `<li data-r="${r.i}" class="${R.sel===r.i?'sel':''} ${w==='skip'?'ignored':''}">
       <span class="n">${r.i+1}</span>
-      <div><div class="l1">${w==='skip'?'Not a rally':w==null?'<b>Winner unknown</b>, pick one':`<span class="${w==='near'?'ca':'cb'}">${nm(w)}</span> wins`} <span class="muted">· ${r.shots} shots · ${r.duration.toFixed(1)} s</span></div>
+      <div><div class="l1">${w==='skip'?'Not a rally':w==null?'<b>Winner unknown</b>, pick one':`<span class="${w==='near'?'ca':'cb'}">${nm(w)}</span> wins`} <span class="muted">· ${r.shots} shots${r.missed&&r.missed.length?` (+${r.missed.length} likely missed)`:''} · ${r.duration.toFixed(1)} s</span></div>
       <div class="l2">${fmtT(r.t0)} · ${corrected?'corrected by you':`last shot ${HOW[r.how]}${r.confidence==='low'?' · unsure':''}`}</div>
       <div class="win">${['near','far','skip'].map(k=>`<button class="${k}" data-win="${k}" data-ri="${r.i}" aria-pressed="${w===k}">${k==='skip'?'Ignore':nm(k)}</button>`).join('')}</div></div></li>`}).join('')||'<p class="muted small">No rallies found. Check the court corners and camera angle.</p>';
 }
@@ -582,7 +582,8 @@ function renderLab(){
   }
   labSets={outlier:new Set(res.shuttle.outlier),filled:new Set(res.shuttle.filled)};
   const P=res.pipeline, sh=P.shuttle, pl=P.players, n=res.meta.frames;
-  const hits=res.rallies.reduce((a,r)=>a+r.shots,0), wob=res.rallies.reduce((a,r)=>a+(r.signal.wobbles.length/2),0), weak=res.rallies.reduce((a,r)=>a+r.signal.below_threshold.length,0);
+  const sum=f=>res.rallies.reduce((a,r)=>a+f(r),0);
+  const hits=sum(r=>r.shots), missed=sum(r=>(r.missed||[]).length), doubles=sum(r=>r.signal.merged.length), nohand=sum(r=>r.signal.wobbles.length), weak=sum(r=>r.signal.below_threshold.length);
   const kept=res.candidates.filter(c=>c.kept).length;
   const secs=Object.values(P.timings_s).reduce((a,b)=>a+b,0);
   const tile=(k,v,sub)=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="small muted">${sub}</div></div>`;
@@ -595,7 +596,7 @@ function renderLab(){
     ${tile('Track cleaning',`${sh.gaps_filled} <span class="small muted">filled</span> · ${sh.outliers_removed} <span class="small muted">removed</span>`,`Gaps up to ${sh.max_gap_frames} frames interpolated. Jumps over ${Math.round(sh.outlier_jump_px)} px removed.`)}
     ${tile('Players tracked',pct(pl.frames_with_player,n),`YOLO26 made ${pl.tracker_ids} track IDs, merged into ${pl.player_slots} player slots (expected ${pl.expected_players})`)}
     ${tile('Rallies',`${kept} <span class="small muted">of ${res.candidates.length}</span>`,`${P.view?`Wide court view in ${pct(P.view.wide_frames,n)} of frames · ${P.view.cuts} camera cuts · `:''}${res.candidates.length-kept} stretches rejected`)}
-    ${tile('Hits',hits,`${wob} wobble pairs removed · ${weak} turns under the threshold`)}
+    ${tile('Hits',`${hits}${missed?` <span class="small muted">+${missed} likely missed</span>`:''}`,`${doubles} doubles merged · ${nohand} rejected, no hand near · ${weak} too weak`)}
     ${tile('Processing',secs?Math.round(secs)+' s':'cached',Object.entries(P.timings_s).map(([k,v])=>`${k.split(' (')[0].replace('Splitting rallies and finding hits','Rallies')}: ${P.cached[k.includes('shuttle')?'shuttle':k.includes('players')?'players':'x']?'cached':v+' s'}`).join(' · '))}
   </div>
   <div class="panel"><h3 class="sec">Coverage timeline <span class="muted small" style="text-transform:none;letter-spacing:0">(whole video)</span></h3>
@@ -663,8 +664,8 @@ function renderLabRally(){
     <div class="toggles"><button class="chip" data-sigwin="around" aria-pressed="${LAB.win==='around'}">10 s around playhead</button><button class="chip" data-sigwin="rally" aria-pressed="${LAB.win==='rally'}">Whole rally</button></div></div>
     <canvas id="sig" class="chart" height="230"></canvas>
     <canvas id="spd" class="chart" height="90"></canvas>
-    <div class="legend"><span><i style="background:var(--muted)"></i>Raw TrackNet y</span><span><i style="background:var(--cork)"></i>Smoothed y</span><span><i style="background:var(--a)"></i>Near hit</span><span><i style="background:var(--b)"></i>Far hit</span><span>○ Turn below threshold</span><span style="color:var(--bad)">× Wobble removed</span><span>▢ Last sighting</span></div>
-    <p class="small muted" style="margin:8px 0 0;max-width:90ch">How hits are found: the chart shows the shuttle's height in the picture (up = toward the far end). A near-side hit sends it up the picture and a far-side hit sends it down, so every turning point is a possible hit. A turn counts if it's at least <b>${Math.round(P.hit_prominence_px)} px</b> (8% of the court's ${Math.round(P.court_height_px)} px height in the picture) and ${P.hit_min_gap_s} s after the previous one. A small up-and-down pair closer than ${P.wobble_gap_s} s is treated as tracker wobble, unless a player's wrist is within ${Math.round(P.hand_near_px)} px both times. The lower chart is the shuttle's speed across the picture.</p>`;
+    <div class="legend"><span><i style="background:var(--muted)"></i>Raw TrackNet y</span><span><i style="background:var(--cork)"></i>Smoothed y</span><span><i style="background:var(--a)"></i>Near hit</span><span><i style="background:var(--b)"></i>Far hit</span><span>○ Rejected: too weak</span><span style="color:var(--bad)">× Rejected: no hand near</span><span>◇ Double merged</span><span>┆? Likely missed shot</span><span>▢ Last sighting</span></div>
+    <p class="small muted" style="margin:8px 0 0;max-width:95ch">How hits are found. A racket contact snaps the shuttle's velocity within a frame or two, while the top of a lift is a smooth curve. The lower chart is that <b>velocity snap</b> (change in velocity, in court heights per second). A peak becomes a hit if it's above <b>${P.contact_strong}</b> with a player's hand within ${P.contact_strong?P.hand_strong:''}× their height, or above <b>${P.contact_weak}</b> with a hand within ${P.hand_weak}× their height. Shots must alternate sides, so near/far is chosen for the whole rally at once from hand positions and which half of the picture the contact is in. The same side twice within 0.35 s is merged as one contact. The same side twice with a normal gap marks a likely missed shot. The upper chart is the shuttle's height in the picture (up = toward the far end).</p>`;
   document.querySelectorAll('[data-sigwin]').forEach(b=>b.onclick=()=>{LAB.win=b.dataset.sigwin;renderLabRally()});
   ['sig','spd'].forEach(id=>$('#'+id).onclick=e=>{const g=LAB.sigGeom;if(!g)return;const rr=e.target.getBoundingClientRect();const f=g.f0+((e.clientX-rr.left)-g.left)/g.iw*(g.f1-g.f0);R.vid.currentTime=Math.max(0,f/R.res.meta.fps)});
   renderShotTable(r); renderCourtMap(r);
@@ -675,12 +676,12 @@ function renderShotTable(r){
   const sm=r.shot_metrics, mx=Math.max(1,...sm.map(s=>s.avg_speed_kmh||0),...sm.map(s=>s.peak_speed_kmh||0));
   const bar=(v,cls)=>v==null?'<span class="muted">–</span>':`<div class="cell"><span class="bar ${cls}" style="width:${Math.round(v/mx*50)}px"></span>${v}</div>`;
   $('#shotPanel').innerHTML=`<h3 class="sec">Shot by shot · Rally ${r.i+1}</h3>
-    <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Size of the turning point in the height signal">Turn px</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
     <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
       <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
       <td class="num">${s.flight_s}s</td><td class="num">${s.distance_m??'–'}${s.distance_m!=null?' m':''}</td>
       <td>${bar(s.avg_speed_kmh,h.side==='near'?'a':'b')}</td><td>${bar(s.peak_speed_kmh,h.side==='near'?'a':'b')}</td>
-      <td class="num">${s.arc_pct??'–'}${s.arc_pct!=null?'%':''}</td><td>${s.direction??'–'}</td><td class="num">${h.hand_dist_px??'–'}</td><td class="num">${h.prominence??'serve'}</td></tr>`}).join('')}</tbody></table></div>
+      <td class="num">${s.arc_pct??'–'}${s.arc_pct!=null?'%':''}</td><td>${s.direction??'–'}</td><td class="num">${h.hand_dist_px??'–'}</td><td class="num">${h.strength??h.prominence??'–'}</td><td class="num">${h.hand_ratio??'–'}</td></tr>`}).join('')}</tbody></table></div>
     <p class="small muted" style="margin:8px 0 0">*Peak speed comes from the shuttle's movement in the picture at the hitter's depth. It's only a rough guide, because the shuttle's height above the floor isn't known. Average speed uses the players' floor positions, so it's more reliable but underestimates curved flights.</p>`;
   $('#shotTbl').onclick=e=>{const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
 }
@@ -757,13 +758,16 @@ function drawSignal(r,f){
   for(const w of r.signal.wobbles){if(w.f<f0||w.f>f1)continue;const x=X(w.f),y=Yp(yAt(w.f));c.strokeStyle=tok('bad');c.lineWidth=1.6;c.beginPath();c.moveTo(x-4,y-4);c.lineTo(x+4,y+4);c.moveTo(x+4,y-4);c.lineTo(x-4,y+4);c.stroke()}
   r.hits.forEach((h,k)=>{if(h.f<f0||h.f>f1)return;const x=X(h.f),y=Yp(yAt(h.f));c.fillStyle=h.side==='near'?tok('a'):tok('b');c.beginPath();c.arc(x,y,5,0,7);c.fill();
     if((f1-f0)/fps<25){c.fillStyle=tok('ink');c.font='600 10px IBM Plex Sans, sans-serif';c.fillText(k+1,x-3,h.side==='near'?y+16:y-8)}});
+  for(const m of r.signal.merged){if(m.f<f0||m.f>f1)continue;const x=X(m.f),y=Yp(yAt(m.f));c.strokeStyle=tok('muted');c.lineWidth=1.3;c.beginPath();c.moveTo(x,y-5);c.lineTo(x+5,y);c.lineTo(x,y+5);c.lineTo(x-5,y);c.closePath();c.stroke()}
+  for(const m of (r.missed||[])){if(m.f<f0||m.f>f1)continue;const x=X(m.f);c.strokeStyle=m.side==='near'?tok('a'):tok('b');c.setLineDash([2,3]);c.beginPath();c.moveTo(x,8);c.lineTo(x,Hh-18);c.stroke();c.setLineDash([]);c.fillStyle=c.strokeStyle;c.font='700 11px IBM Plex Sans, sans-serif';c.fillText('?',x+3,18)}
   const L=r.landing;if(L.f>=f0&&L.f<=f1){c.strokeStyle=tok('ink');c.lineWidth=1.5;c.strokeRect(X(L.f)-5,Yp(L.px[1])-5,10,10)}
   c.strokeStyle=tok('ink');c.lineWidth=1.2;if(f>=f0&&f<=f1){c.beginPath();c.moveTo(X(f),4);c.lineTo(X(f),Hh-16);c.stroke()}
   // --- speed
   const Hs=90;cs.width=W*dpr;cs.height=Hs*dpr;const d=cs.getContext('2d');d.scale(dpr,dpr);
-  const sp=r.signal.speed_px_s;let mx=1;for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v>mx)mx=v}
+  const snapMode=!!r.signal.snap, sp=snapMode?r.signal.snap:r.signal.speed_px_s;let mx=snapMode?1.5:1;for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v>mx)mx=v}
   const Ys=v=>Hs-14-(v/mx)*(Hs-24);
-  d.font='500 10px IBM Plex Sans, sans-serif';d.fillStyle=tok('muted');d.textAlign='right';d.fillText(Math.round(mx),left-6,14);d.fillText('px/s',left-6,26);d.fillText('0',left-6,Hs-12);d.textAlign='left';
+  d.font='500 10px IBM Plex Sans, sans-serif';d.fillStyle=tok('muted');d.textAlign='right';d.fillText(snapMode?mx.toFixed(1):Math.round(mx),left-6,14);d.fillText(snapMode?'snap':'px/s',left-6,26);d.fillText('0',left-6,Hs-12);d.textAlign='left';
+  if(snapMode){const A=R.res.pipeline.analysis;for(const[t,l]of[[A.contact_strong,'strong'],[A.contact_weak,'weak']]){d.strokeStyle=tok('muted');d.setLineDash([3,4]);d.beginPath();d.moveTo(left,Ys(t));d.lineTo(W-8,Ys(t));d.stroke();d.setLineDash([]);d.fillText(l+' '+t,W-70,Ys(t)-3)}}
   d.strokeStyle=tok('line');d.beginPath();d.moveTo(left,Ys(0));d.lineTo(W-8,Ys(0));d.stroke();
   d.beginPath();d.moveTo(X(f0),Ys(0));for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v!=null)d.lineTo(X(fr),Ys(v))}d.lineTo(X(f1),Ys(0));d.closePath();d.fillStyle=tok('cork');d.globalAlpha=.25;d.fill();d.globalAlpha=1;
   d.strokeStyle=tok('cork');d.lineWidth=1.5;d.beginPath();st=false;for(let fr=f0;fr<=f1;fr++){const v=sp[fr-r.start];if(v==null)continue;if(!st){d.moveTo(X(fr),Ys(v));st=true}else d.lineTo(X(fr),Ys(v))}d.stroke();
@@ -780,9 +784,11 @@ function renderSettings(){
     ['Outlier jump',`${Math.round(S.outlier_jump_px)} px`,'A single point that jumps this far from both neighbours is removed.'],
     ['Rally gap',`${A.rally_gap_s} s`,'Losing the shuttle for longer than this ends a rally.'],
     ['Minimum rally',`${A.min_rally_s} s, ${Math.round(A.min_visible_frac*100)}% seen, ${A.min_travel_courts} court lengths travelled`,'Stretches failing any of these are rejected (listed below).'],
-    ['Smoothing',`${A.smooth_window_frames} frames`,'Savitzky–Golay filter on the height signal before looking for turns.'],
-    ['Hit threshold',`${Math.round(A.hit_prominence_px)} px turn, ${A.hit_min_gap_s} s apart`,'8% of the court height in the picture.'],
-    ['Wobble filter',`< ${Math.round(A.wobble_prominence_px)} px within ${A.wobble_gap_s} s`,`Kept if a wrist is within ${Math.round(A.hand_near_px)} px of the shuttle for both turns.`],
+    ['Contact: strong',`snap ≥ ${A.contact_strong}, hand ≤ ${A.hand_strong}× height`,'A sharp velocity change with a player’s hand reasonably near.'],
+    ['Contact: weak',`snap ≥ ${A.contact_weak}, hand ≤ ${A.hand_weak}× height`,'A gentler change (soft net shots, serves) needs a hand right at the shuttle.'],
+    ['Minimum gap',`${A.hit_min_gap_s} s`,'Two contacts closer than this keep only the sharper one.'],
+    ['Sides',`alternate`,'Near/far picked for the whole rally at once. The same side twice within 0.35 s is merged. With a normal gap it marks a likely missed shot.'],
+    ['Stuck detections',`${S.stuck_frames??0} frames removed`,'A point that sits still for 0.4 s and then jumps away was never the shuttle.'],
     ['Landing',`still for 0.1 s, moving < ${Math.round(A.still_px)} px`,'The final motionless stretch is the landing. A last sighting that projects off the court is marked unknown.'],
   ];
   return `<div class="tbl-wrap" style="margin-top:10px"><table class="t"><thead><tr><th>Setting</th><th>Value</th><th>What it does</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${r[0]}</b></td><td class="num">${esc(r[1])}</td><td class="muted">${r[2]}</td></tr>`).join('')}</tbody></table></div>

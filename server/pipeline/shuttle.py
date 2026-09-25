@@ -75,7 +75,7 @@ def _read(path):
     return df[["v", "x", "y"]]
 
 
-def clean(df, n_frames, max_gap=4, max_jump_frac=0.12, width=1920):
+def clean(df, n_frames, max_gap=4, max_jump_frac=0.12, width=1920, fps=25.0):
     """Fill short gaps and drop single-frame teleports.
 
     Returns a dict of per-frame arrays: v/x/y (cleaned), raw_v/raw_x/raw_y (TrackNet output),
@@ -99,11 +99,30 @@ def clean(df, n_frames, max_gap=4, max_jump_frac=0.12, width=1920):
             if d1 > jump and d2 > jump and dn < jump:
                 v[i] = False; x[i] = np.nan; y[i] = np.nan; outlier[i] = True
 
+    # TrackNet sometimes locks onto something static (a light, a mark on the net) while the
+    # real shuttle goes unseen. A point that sits still for 0.4 s and then jumps far away in a
+    # frame or two was never the shuttle. (A real landing stays put or fades out instead.)
+    stuck = np.zeros(n_frames, bool)
+    min_run, jump_px = max(5, int(0.4 * fps)), 0.025 * width
+    i = 0
+    while i < n_frames:
+        if not v[i]:
+            i += 1; continue
+        j = i
+        while j + 1 < n_frames and v[j + 1] and np.hypot(x[j + 1] - x[i], y[j + 1] - y[i]) < 3:
+            j += 1
+        if j - i + 1 >= min_run:
+            nxt = next((m for m in range(j + 1, min(n_frames, j + 4)) if v[m]), None)
+            if nxt is not None and np.hypot(x[nxt] - x[j], y[nxt] - y[j]) > jump_px:
+                stuck[i:j + 1] = True
+        i = j + 1
+    v[stuck] = False; x[stuck] = np.nan; y[stuck] = np.nan
+
     # Linear-interpolate gaps up to max_gap frames.
     s = pd.DataFrame({"x": x, "y": y}).interpolate(limit=max_gap, limit_area="inside")
     x, y = s["x"].to_numpy().copy(), s["y"].to_numpy().copy()
     v2 = ~np.isnan(x)
     filled = v2 & ~v
     return {"v": v2, "x": x, "y": y, "raw_v": raw_v, "raw_x": raw_x, "raw_y": raw_y,
-            "outlier": outlier, "filled": filled,
-            "params": {"max_gap_frames": max_gap, "outlier_jump_px": round(jump, 1)}}
+            "outlier": outlier | stuck, "stuck": stuck, "filled": filled,
+            "params": {"max_gap_frames": max_gap, "outlier_jump_px": round(jump, 1), "stuck_frames": int(stuck.sum())}}

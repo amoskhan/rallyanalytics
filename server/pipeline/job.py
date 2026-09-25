@@ -176,7 +176,7 @@ def _analyse(vid):
     cached_shuttle = os.path.exists(shuttle.csv_path(shuttle_dir))
     raw = shuttle.track(video, shuttle_dir, n, stage(S1, 0.0, 0.6))
     done(S1)
-    sh = shuttle.clean(raw, n, width=meta["w"])
+    sh = shuttle.clean(raw, n, width=meta["w"], fps=fps)
 
     # View check and player tracking are cached per court calibration.
     key = hashlib.md5(json.dumps(cfg["corners"]).encode()).hexdigest()[:10]

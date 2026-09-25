@@ -63,6 +63,65 @@ def _hitter(players, f, side, sx, sy):
     return best, (None if best is None else float(best_d))
 
 
+def _hand_ratio(players, f, sx, sy):
+    """Closest wrist (or body centre) of any player to the shuttle, as a fraction of that
+    player's height in the picture, so near and far players are judged alike.
+    Returns (ratio, side, player, distance_px); ratio is 9 when no player is found."""
+    best = (9.0, None, None, None)
+    for g in (f - 1, f, f + 1):
+        for p in players.get(g, []):
+            b = p["box"]
+            bh = max(1.0, b[3] - b[1])
+            pts = [p["kps"][i][:2] for i in (L_WRIST, R_WRIST) if p["kps"][i][2] > 0.3]
+            pts.append([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2])
+            d = min(float(np.hypot(px - sx, py - sy)) for px, py in pts)
+            if d / bh < best[0]:
+                best = (d / bh, p["side"], p, round(d, 1))
+    return best
+
+
+def _assign_sides(kept, xs, ys, court, players, s):
+    """Most likely near/far label for each contact, given that shots alternate sides.
+
+    Evidence per contact: which team's hand is nearest (weighted by how near), and whether
+    the contact is below the net line in the picture (near half) or above it (far half).
+    Viterbi over the sequence; a same-side repeat costs a penalty (it means a missed shot).
+    """
+    if not kept:
+        return []
+    net_y = float(court.to_image([[3.05, NET_Y]])[0][1])
+    far_y = float(court.to_image([[3.05, 13.4]])[0][1])
+    near_y = float(court.to_image([[3.05, 0.0]])[0][1])
+    cost = []                                        # cost[t] = {side: cost}
+    for h in kept:
+        c = {"near": 0.0, "far": 0.0}
+        if h["side"] is not None and h["hand_ratio"] is not None:
+            w = 1.5 / (0.15 + h["hand_ratio"])     # a hand right at the shuttle is strong evidence
+            c[OTHER[h["side"]]] += w
+        y = float(ys[h["i"]])
+        # Below the net line => near half (contacts there are almost always near players).
+        z = (y - net_y) / max(1.0, (near_y - far_y) / 2)
+        c["far"] += max(0.0, z) * 4.0
+        c["near"] += max(0.0, -z) * 1.5            # far-half position is weaker: near players smash from high too
+        cost.append(c)
+    SAME = 6.0
+    best = [{sd: cost[0][sd] for sd in ("near", "far")}]
+    back = [{}]
+    for t in range(1, len(kept)):
+        best.append({}); back.append({})
+        for sd in ("near", "far"):
+            opts = {prev: best[t - 1][prev] + (SAME if prev == sd else 0.0) for prev in ("near", "far")}
+            prev = min(opts, key=opts.get)
+            best[t][sd] = opts[prev] + cost[t][sd]
+            back[t][sd] = prev
+    sd = min(best[-1], key=best[-1].get)
+    out = [sd]
+    for t in range(len(kept) - 1, 0, -1):
+        sd = back[t][sd]
+        out.append(sd)
+    return out[::-1]
+
+
 def _landing_frame(x, y, s, e, fps, still_px):
     """First frame of the shuttle's final motionless stretch (it has hit the floor), else e."""
     k = max(2, int(0.1 * fps))
@@ -110,9 +169,7 @@ def find_rallies(sh, players, court: Court, fps, mode, view=None):
     still_px = max(3.0, 0.006 * court_h)
     params = {
         "rally_gap_s": 0.8, "min_rally_s": 1.2, "min_visible_frac": 0.6, "min_travel_courts": 0.8,
-        "hit_prominence_px": round(0.08 * court_h, 1), "hit_min_gap_s": 0.28,
-        "wobble_prominence_px": round(0.2 * court_h, 1), "wobble_gap_s": 0.45,
-        "hand_near_px": round(0.12 * court_h, 1),
+        "contact_strong": 0.8, "contact_weak": 0.5, "hand_strong": 0.7, "hand_weak": 0.3, "hit_min_gap_s": 0.25,
         "smooth_window_frames": max(5, int(fps * 0.17) | 1), "still_px": round(still_px, 1),
         "court_height_px": round(court_h, 1),
     }
@@ -161,73 +218,88 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     win = params["smooth_window_frames"]
     ysm = savgol_filter(ys, win, 2) if len(ys) > win else ys.copy()
 
-    prom, dist = params["hit_prominence_px"], max(3, int(params["hit_min_gap_s"] * fps))
-    near_i, pn = find_peaks(ysm, prominence=prom, distance=dist)      # y max: shuttle low in image -> near player
-    far_i, pf = find_peaks(-ysm, prominence=prom, distance=dist)      # y min: far player
-    # Weaker turning points too, so the chart can show what fell under the threshold.
-    weak_n, wn = find_peaks(ysm, prominence=prom * 0.35, distance=dist)
-    weak_f, wf = find_peaks(-ysm, prominence=prom * 0.35, distance=dist)
-    strong = set(near_i.tolist()) | set(far_i.tolist())
-    below = [{"f": int(s + i), "side": sd, "prominence": round(float(p), 1)}
-             for arr, props, sd in ((weak_n, wn, "near"), (weak_f, wf, "far"))
-             for i, p in zip(arr, props["prominences"]) if int(i) not in strong]
+    # Contact detector. A racket contact snaps the shuttle's velocity in a frame or two;
+    # the top of a lift or clear is a smooth curve. So a hit is a sharp change between the
+    # average velocity just before and just after a frame, with a player's hand at the shuttle.
+    k = 2
+    vx, vy = np.diff(xs), np.diff(ys)
+    snap = np.zeros(len(xs))                   # velocity change, court heights per second
+    for t in range(k, len(xs) - k):
+        bx, by = vx[t - k:t].mean(), vy[t - k:t].mean()
+        ax, ay = vx[t:t + k].mean(), vy[t:t + k].mean()
+        snap[t] = np.hypot(ax - bx, ay - by) / court_h * fps
+    peaks, props = find_peaks(snap, height=params["contact_weak"], distance=max(2, int(0.2 * fps)))
 
-    events = sorted([(int(i), "near", float(p)) for i, p in zip(near_i, pn["prominences"])] +
-                    [(int(i), "far", float(p)) for i, p in zip(far_i, pf["prominences"])])
-
-    # A small down-up wobble in the track shows as a peak and trough close together with
-    # similar prominence. Drop such pairs unless a player's hand is at the shuttle for both.
-    def hand_near(ev):
-        _, d = _hitter(players, s + ev[0], ev[1], float(xs[ev[0]]), float(ys[ev[0]]))
-        return d is not None and d < params["hand_near_px"]
-
-    wobbles, changed = [], True
-    while changed:
-        changed = False
-        for j in range(len(events) - 1):
-            a, b = events[j], events[j + 1]
-            if (a[1] != b[1] and b[0] - a[0] < params["wobble_gap_s"] * fps
-                    and min(a[2], b[2]) < params["wobble_prominence_px"] and not (hand_near(a) and hand_near(b))):
-                wobbles += [{"f": int(s + ev[0]), "side": ev[1], "prominence": round(ev[2], 1)} for ev in (a, b)]
-                del events[j:j + 2]
-                changed = True
-                break
+    hits_raw, rejected = [], []
+    for i, h in zip(peaks, props["peak_heights"]):
+        ratio, side, pl, d_px = _hand_ratio(players, s + int(i), float(xs[i]), float(ys[i]))
+        ok = (h >= params["contact_strong"] and ratio <= params["hand_strong"]) or ratio <= params["hand_weak"]
+        rec = {"i": int(i), "f": int(s + i), "strength": round(float(h), 2), "hand_ratio": _r(ratio if ratio < 9 else None),
+               "side": side, "pl": pl, "hand_px": d_px}
+        if ok:
+            hits_raw.append(rec)
+        else:
+            rec["reason"] = "no hand near the shuttle" if ratio > params["hand_strong"] else "too weak for how far the hand was"
+            rejected.append(rec)
+    # Two contacts can't be closer than the minimum gap: keep the sharper one.
+    kept, merged = [], []
+    for hrec in hits_raw:
+        if kept and hrec["i"] - kept[-1]["i"] < int(params["hit_min_gap_s"] * fps):
+            loser = hrec if hrec["strength"] <= kept[-1]["strength"] else kept[-1]
+            merged.append({"f": loser["f"], "side": loser["side"], "strength": loser["strength"]})
+            if hrec["strength"] > kept[-1]["strength"]:
+                kept[-1] = hrec
+        else:
+            kept.append(hrec)
+    if not kept:                                 # always at least one shot per rally
+        j = int(np.argmax(snap))
+        ratio, side, pl, d_px = _hand_ratio(players, s + j, float(xs[j]), float(ys[j]))
+        kept = [{"i": j, "f": s + j, "strength": round(float(snap[j]), 2), "hand_ratio": None, "side": side, "pl": pl, "hand_px": d_px}]
 
     # How did the rally start? A serve starts from a shuttle held still in the server's hand.
     k0 = max(2, int(0.2 * fps))
     still_start = len(xs) > k0 and np.hypot(xs[k0] - xs[0], ys[k0] - ys[0]) < 2 * params["still_px"]
-    if still_start:
-        start_reason = "serve"
-    elif joined:
-        start_reason = "joined mid-rally"      # video or camera started during play
-    else:
-        start_reason = "shuttle appeared"      # possibly a serve the tracker only caught in flight
-    # Which way does the shuttle leave the start of the rally? That side played the first shot.
-    k = min(len(ysm) - 1, max(2, int(0.15 * fps)))
-    first_side = "near" if ysm[k] < ysm[0] else "far"
-    if not events or (start_reason != "joined mid-rally"
-                      and (events[0][0] > int(0.3 * fps) or events[0][1] != first_side)):
-        events.insert(0, (0, first_side, float("inf")))
+    start_reason = "serve" if still_start else "joined mid-rally" if joined else "shuttle appeared"
 
-    # Enforce alternation: two hits in a row by the same side keep the stronger turn.
-    alt, merged = [], []
-    for ev in events:
-        if alt and alt[-1][1] == ev[1]:
-            loser = ev if ev[2] <= alt[-1][2] else alt[-1]
-            merged.append({"f": int(s + loser[0]), "side": loser[1], "prominence": round(loser[2], 1)})
-            if ev[2] > alt[-1][2]:
-                alt[-1] = ev
-        else:
-            alt.append(ev)
-
+    # The same side can't play twice within DOUBLE_GAP: that's one contact seen twice.
+    # Drop the weaker, re-label, and repeat until none remain.
+    DOUBLE_GAP = int(0.35 * fps)
+    while True:
+        sides = _assign_sides(kept, xs, ys, court, players, s)
+        dup = [t for t in range(1, len(kept))
+               if sides[t] == sides[t - 1] and kept[t]["i"] - kept[t - 1]["i"] <= DOUBLE_GAP]
+        if not dup:
+            break
+        t = dup[0]
+        loser = t if kept[t]["strength"] <= kept[t - 1]["strength"] else t - 1
+        merged.append({"f": kept[loser]["f"], "side": sides[loser], "strength": kept[loser]["strength"],
+                       "reason": "same side twice within 0.35 s"})
+        del kept[loser]
     hits = []
-    for i, side, p in alt:
-        f = s + i
-        pl, d = _hitter(players, f, side, float(xs[i]), float(ys[i]))
-        hits.append({"f": int(f), "side": side, "px": [round(float(xs[i]), 1), round(float(ys[i]), 1)],
-                     "prominence": None if p == float("inf") else round(p, 1), "serve": i == 0 and start_reason != "joined mid-rally",
-                     "player": pl["id"] if pl else None, "court": pl["court"] if pl else None,
-                     "hand_dist_px": _r(d, 1)})
+    for n_, hrec in enumerate(kept):
+        i = hrec["i"]
+        side = sides[n_]
+        if hrec["pl"] is not None and hrec["pl"]["side"] != side:
+            # The nearest hand belonged to the other team (they overlap in the picture):
+            # credit the closest player on the side that actually played it.
+            ratio, _, pl, d_px = _hand_ratio({k_: [q for q in v_ if q["side"] == side] for k_, v_ in
+                                               ((g, players.get(g, [])) for g in range(hrec["f"] - 1, hrec["f"] + 2))},
+                                              hrec["f"], float(xs[i]), float(ys[i]))
+            hrec = dict(hrec, pl=pl, hand_px=d_px, hand_ratio=_r(ratio if ratio < 9 else None))
+        hits.append({"f": hrec["f"], "side": side, "px": [round(float(xs[i]), 1), round(float(ys[i]), 1)],
+                     "strength": hrec["strength"], "hand_ratio": hrec["hand_ratio"],
+                     "serve": n_ == 0 and start_reason == "serve",
+                     "player": hrec["pl"]["id"] if hrec["pl"] else None,
+                     "court": hrec["pl"]["court"] if hrec["pl"] else None,
+                     "hand_dist_px": hrec["hand_px"]})
+    # Same side twice in a row with a normal gap: the other side's shot in between was missed.
+    missed = [{"f": (a["f"] + b["f"]) // 2, "after": a["f"], "before": b["f"], "side": OTHER[a["side"]]}
+              for a, b in zip(hits, hits[1:]) if a["side"] == b["side"]]
+    same_side = len(missed)
+    below = [{"f": r_["f"], "strength": r_["strength"], "hand_ratio": r_["hand_ratio"], "reason": r_["reason"]}
+             for r_ in rejected if r_["reason"].startswith("too weak")]
+    wobbles = [{"f": r_["f"], "strength": r_["strength"], "hand_ratio": r_["hand_ratio"], "reason": r_["reason"]}
+               for r_ in rejected if r_["reason"].startswith("no hand")]
 
     lx, ly = (x[land_f], y[land_f]) if not np.isnan(x[land_f]) else (x[e], y[e])
     cx, cy = court.to_court([[lx, ly]])[0]
@@ -259,7 +331,7 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     return {
         "start": int(s), "end": int(e2), "t0": round(s / fps, 2), "t1": round(e2 / fps, 2),
         "duration": round((e2 - s + 1) / fps, 2),
-        "hits": hits, "shots": len(hits), "server_side": hits[0]["side"] if hits[0]["serve"] else None,
+        "hits": hits, "shots": len(hits), "shots_estimated": len(hits) + len(missed), "missed": missed, "server_side": hits[0]["side"] if hits[0]["serve"] else None,
         "shot_metrics": shots, "start_reason": start_reason,
         "end_reason": "landed" if settled and plausible else "camera cut away" if cut_end else "shuttle lost from view",
         "landing": landing, "winner_side": winner, "how": how,
@@ -269,7 +341,9 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                      "filled": int(sh["filled"][s:e2 + 1].sum()), "outliers": int(sh["outlier"][s:e2 + 1].sum())},
         "signal": {"y_smooth": [round(float(a), 1) for a in ysm[::step]],
                    "speed_px_s": [round(float(a)) for a in speed[::step]],
-                   "below_threshold": below, "merged": merged, "wobbles": wobbles},
+                   "snap": [round(float(a), 2) for a in snap[::step]],
+                   "below_threshold": below, "merged": merged, "wobbles": wobbles,
+                   "same_side_pairs": same_side},
     }
 
 
