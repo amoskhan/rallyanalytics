@@ -1,20 +1,38 @@
-"""Rule-based stroke classification for each shot.
+"""Rule-based stroke classification using the ShuttleSet taxonomy (18 types).
 
-Uses what the pipeline already measures: how high the contact was relative to the
-hitter's body, where the hitter stood, where the shot went (the next contact or the
-landing), flight time, speed and arc. Every decision returns a plain-English reason
-so it can be checked against the video and the rules tuned from user corrections.
+ShuttleSet (Wang et al., KDD 2023) labels BWF singles broadcasts with 18 shot types,
+so using the same names keeps our labels comparable and lets a model be trained on
+it later. Each shot is classified from what the pipeline measures:
 
-Court zones by distance from the net (each half is 6.70 m long; the short service
-line is 1.98 m from the net): front < 2.5 m, mid 2.5-4.3 m, rear > 4.3 m.
+- contact height from the hitter's racket wrist (0 = hips, 1 = nose; wrist_height)
+- the court zone it was hit from and went to (next contact, or the landing)
+- flight time, average speed, arc and direction
+- context: first shot = serve; what the previous shot was
+
+Every decision comes with a plain-English reason. Court zones by distance from the
+net (each half is 6.70 m; the short service line is 1.98 m out): front < 2.5 m,
+mid 2.5-4.3 m, rear > 4.3 m.
 """
 from .court import NET_Y
 
-STROKES = ["short serve", "long serve", "clear", "smash", "drop", "net shot", "lift",
-           "push", "drive", "net kill", "block"]
+STROKES = [
+    "short service", "long service",
+    "net shot", "return net", "cross-court net shot",
+    "push", "rush",
+    "lob", "defensive return lob",
+    "clear", "drop", "passive drop", "smash", "wrist smash",
+    "drive", "driven flight", "back-court drive", "defensive return drive",
+]
+ATTACKS = ("smash", "wrist smash", "rush")
+NET_ARRIVALS = ("net shot", "return net", "cross-court net shot", "drop", "passive drop")
 
 FRONT, REAR = 2.5, 4.3          # metres from the net
 OVERHEAD, UNDERARM = 0.95, 0.3  # racket-wrist height: 0 = hips, 1 = nose
+SMASH_KMH, WRIST_SMASH_KMH = 55, 38
+
+# Older labels (before the ShuttleSet taxonomy) -> new names, for saved corrections.
+LEGACY = {"short serve": "short service", "long serve": "long service", "lift": "lob",
+          "block": "return net", "net kill": "rush"}
 
 
 def zone(depth):
@@ -63,59 +81,73 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
     from_d = abs(hit["court"][1] - NET_Y) if hit.get("court") else None
     to_d = abs(nxt_court[1] - NET_Y) if nxt_court else None
     zf, zt = zone(from_d), zone(to_d)
-    band = height_band(hit.get("contact_h"))
+    h = hit.get("contact_h")
+    band = height_band(h)
     t = shot["flight_s"]
-    fast = (shot.get("avg_speed_kmh") or 0) >= 50 or (t < 0.6 and (shot.get("distance_m") or 0) > 4.5)
-    facts = [f for f in (band, f"from the {zf} court" if zf else None,
-                         f"to the {zt} court" if zt else None, f"{t:.2f} s flight") if f]
+    kmh = shot.get("avg_speed_kmh") or 0
+    arc = shot.get("arc_pct") or 0
+    cross = shot.get("direction") == "cross-court"
+    flat = t < 0.7 and arc < 15
+    facts = [f for f in (band, f"from the {zf} court" if zf else None, f"to the {zt} court" if zt else None,
+                         f"{t:.2f} s flight", f"{kmh:.0f} km/h" if kmh else None,
+                         f"after a {prev_stroke}" if prev_stroke else None) if f]
     why = lambda s: (s, ", ".join(facts))
+    answering_attack = prev_stroke in ATTACKS
+    answering_net = prev_stroke in NET_ARRIVALS
 
     if is_serve:
-        # Short serves skim the net: low arc, quick flight. Long serves go high to the back.
-        high = (shot.get("arc_pct") or 0) >= 35 or t >= 1.1 or zt == "rear"
-        return why("long serve" if high else "short serve")
+        # Short services skim the net: low arc, quick flight. Long ones go high to the back.
+        high = arc >= 35 or t >= 1.1 or zt == "rear"
+        return why("long service" if high else "short service")
     if band is None and zf is None:
         return ("unknown", "no player position or pose at contact")
 
+    # --- overhead: clear, drop, passive drop, smash, wrist smash (rush at the net)
     if band == "overhead":
-        if zf == "front" and (fast or t < 0.5):
-            return why("net kill")
-        if zt == "rear" and t >= 0.9:
-            return why("clear")
-        if fast and t < 0.8:
+        if zf == "front" and (kmh >= WRIST_SMASH_KMH or t < 0.45):
+            return why("rush")
+        if kmh >= SMASH_KMH or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
             return why("smash")
-        if zt == "front":
-            return why("drop")
-        # Overhead but not fast: long and high is a clear, otherwise a (slow or fast) drop.
-        return why("clear" if t >= 0.95 else "drop")
+        if kmh >= WRIST_SMASH_KMH and t < 0.8 and zf != "rear":
+            return why("wrist smash")
+        if t >= 0.95 and zt != "front":
+            return why("clear")
+        # A drop reached late from deep (wrist only just overhead) is a passive drop.
+        if zf == "rear" and h is not None and h < 1.1:
+            return why("passive drop")
+        return why("drop")
 
-    if band == "underarm":
-        if prev_stroke in ("smash", "net kill") and zt == "front":
-            return why("block")
-        if zf == "front":
-            if zt == "rear" or t >= 0.9:
-                return why("lift")
-            if zt == "front":
-                return why("net shot")
-            return why("push")
+    # --- replies to an attack: defensive lob / drive, or a block to the net (return net)
+    if answering_attack and zf != "front":
         if zt == "front":
-            return why("block")
-        return why("lift" if t >= 0.9 else "drive")
+            return why("return net")
+        if t >= 0.9 or arc >= 30:
+            return why("defensive return lob")
+        return why("defensive return drive")
 
-    # Side-arm (roughly shoulder height) or unknown height.
+    # --- front court: net shots, push, rush, lob
     if zf == "front":
-        if fast or t < 0.45:
-            return why("net kill" if band == "overhead" else "push")
-        if zt == "front":
-            return why("net shot")
-        return why("lift" if (zt == "rear" or t >= 0.9) else "push")
-    if t < 0.65 and (shot.get("arc_pct") or 0) < 8:
+        if zt == "front" and t < 0.9:
+            if cross:
+                return why("cross-court net shot")
+            return why("return net" if answering_net else "net shot")
+        if t >= 0.9 or zt == "rear" or arc >= 30:
+            return why("lob")
+        if band == "side" and kmh >= 45:
+            return why("rush")
+        if flat:
+            return why("driven flight")
+        return why("push")
+
+    # --- mid / rear court, below the head
+    if band == "underarm" and (t >= 0.9 or arc >= 30):
+        return why("lob")
+    if t >= 0.95:
+        return why("clear" if zf == "rear" and band == "side" else "lob")
+    if zf == "rear" and flat:
+        return why("back-court drive")
+    if flat or kmh >= 40:
         return why("drive")
     if zt == "front":
-        return why("drop" if band != "underarm" else "block")
-    if t >= 0.95:
-        # A long flight from side-arm height is a high shot: clear from the back, lift otherwise.
-        return why("clear" if zf == "rear" else "lift")
-    if zf == "mid" and (shot.get("avg_speed_kmh") or 0) < 40:
-        return why("push")
-    return why("drive")
+        return why("drop" if band == "side" else "net shot")
+    return why("push")

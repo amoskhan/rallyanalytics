@@ -384,7 +384,7 @@ let R=null; // {res, players, review, sel, show}
 async function renderReview(v){
   const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
   const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
-  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),strokesOv:review.strokes||{},live:{k:-2,r:-1}};
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),strokesOv:Object.fromEntries(Object.entries(review.strokes||{}).map(([k,v])=>[k,LEGACY[v]||v])),live:{k:-2,r:-1}};
   const meta=res.meta, dbl=res.mode==='doubles';
   const nameField=(key,label,cls)=>`<div class="field"><span class="${cls}">${label}</span><input id="nm_${key}" data-name="${key}" value="${esc(R.names[key])}" maxlength="24"></div>`;
   $('#app').innerHTML=`<div class="ws review">
@@ -487,9 +487,23 @@ function renderRallyCard(){
 }
 
 // Strokes: the pipeline's guess per shot, or the user's correction.
-const STROKES=['short serve','long serve','clear','smash','drop','net shot','lift','push','drive','net kill','block'];
-const STROKE_COL={'short serve':'#8a8f98','long serve':'#8a8f98',clear:'#4c8dd6',smash:'#d64545',drop:'#9b6ad6',
-  'net shot':'#2f9e8f',lift:'#d6a13a',push:'#6aa84f',drive:'#e07a2e','net kill':'#b3265a',block:'#5f7a8a',unknown:'#999'};
+// ShuttleSet's 18 shot types, grouped by family for the dropdown and colours.
+const STROKE_GROUPS=[
+  ['Serve',['short service','long service']],
+  ['Net',['net shot','return net','cross-court net shot']],
+  ['Front court',['push','rush']],
+  ['Lift',['lob','defensive return lob']],
+  ['Overhead',['clear','drop','passive drop','smash','wrist smash']],
+  ['Flat',['drive','driven flight','back-court drive','defensive return drive']]];
+const STROKES=STROKE_GROUPS.flatMap(g=>g[1]);
+const STROKE_COL={'short service':'#8a8f98','long service':'#6b7280',
+  'net shot':'#2f9e8f','return net':'#3fb5a4','cross-court net shot':'#1f7a6e',
+  push:'#6aa84f',rush:'#b3265a',
+  lob:'#d6a13a','defensive return lob':'#b8862a',
+  clear:'#4c8dd6',drop:'#9b6ad6','passive drop':'#b99be3',smash:'#d64545','wrist smash':'#e27272',
+  drive:'#e07a2e','driven flight':'#f09a55','back-court drive':'#c2601c','defensive return drive':'#a8662e',unknown:'#999'};
+// Corrections saved with the earlier stroke list, renamed to ShuttleSet types.
+const LEGACY={'short serve':'short service','long serve':'long service',lift:'lob',block:'return net','net kill':'rush'};
 const strokeKey=(r,k)=>`${r.i}:${r.hits[k].f}`;
 const strokeOf=(r,k)=>R.strokesOv[strokeKey(r,k)]||r.shot_metrics[k]?.stroke||'unknown';
 const strokeFixed=(r,k)=>strokeKey(r,k) in R.strokesOv;
@@ -822,7 +836,7 @@ function renderShotTable(r){
     <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Pick the right stroke if the guess is wrong">Stroke</th><th title="Contact height: overhead, side or underarm">Contact</th><th title="Court zone hit from → zone it went to">From → to</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
     <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
       <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
-      <td title="${esc(s.stroke_why||'')}"><select class="strokesel${strokeFixed(r,k)?' fixed':''}" data-stroke="${strokeKey(r,k)}" data-auto="${s.stroke||'unknown'}" style="border-left:4px solid ${STROKE_COL[strokeOf(r,k)]}">${STROKES.concat(['unknown']).map(o=>`<option value="${o}"${o===strokeOf(r,k)?' selected':''}>${cap1(o)}${o===s.stroke&&strokeFixed(r,k)?' (guess)':''}</option>`).join('')}</select></td>
+      <td title="${esc(s.stroke_why||'')}"><select class="strokesel${strokeFixed(r,k)?' fixed':''}" data-stroke="${strokeKey(r,k)}" data-auto="${s.stroke||'unknown'}" style="border-left:4px solid ${STROKE_COL[strokeOf(r,k)]}">${STROKE_GROUPS.map(([g,list])=>`<optgroup label="${g}">${list.map(o=>`<option value="${o}"${o===strokeOf(r,k)?' selected':''}>${cap1(o)}${o===s.stroke&&strokeFixed(r,k)?' (guess)':''}</option>`).join('')}</optgroup>`).join('')}<option value="unknown"${strokeOf(r,k)==='unknown'?' selected':''}>Unknown</option></select></td>
       <td>${s.contact??'–'}</td><td class="small">${s.from_zone??'?'} → ${s.to_zone??'?'}</td>
       <td class="num">${s.flight_s}s</td><td class="num">${s.distance_m??'–'}${s.distance_m!=null?' m':''}</td>
       <td>${bar(s.avg_speed_kmh,h.side==='near'?'a':'b')}</td><td>${bar(s.peak_speed_kmh,h.side==='near'?'a':'b')}</td>
@@ -915,7 +929,7 @@ function renderSettings(){
     ['Contact: weak',`snap ≥ ${A.contact_weak}, hand ≤ ${A.hand_weak}× height`,'A gentler change (soft net shots, serves) needs a hand right at the shuttle.'],
     ['Minimum gap',`${A.hit_min_gap_s} s`,'Two contacts closer than this keep only the sharper one.'],
     ['Inferred shots',`same side ≥ ${A.missed_gap_s??0.9} s apart`,'Adds a shot the video couldn’t see: before the first contact if the shuttle was already flying, or between two same-side contacts far enough apart.'],
-    ['Strokes',`overhead ≥ 0.85, underarm < 0.35 · front < 2.5 m, rear > 4.3 m`,'Contact height is the shuttle against the hitter from hips (0) to head (1). Zones are distance from the net. Overhead + rear + long flight = clear, overhead + fast = smash, overhead + to the front = drop, underarm in the front court = net shot, lift or push, underarm after a smash = block, flat and quick = drive.'],
+    ['Strokes (ShuttleSet 18)',`wrist overhead ≥ 0.95, underarm < 0.3 · front < 2.5 m, rear > 4.3 m · smash ≥ 55 km/h, wrist smash ≥ 38`,'Contact height is the racket wrist from hips (0) to nose (1). Zones are distance from the net. Overhead: long = clear, to the front = drop (passive when reached late from deep), fast = smash, medium from mid court = wrist smash, at the net = rush. Front court: to the front = net shot (return net after a net shot or drop, cross-court if it crosses), high = lob, flat = push or driven flight. After a smash or rush: return net, defensive return lob or defensive return drive. Flat from mid court = drive, from the back = back-court drive.'],
     ['Air drag',`turn < ${A.drag_turn_deg??35}° and slowing`,'Braking in a straight line is air drag, not a contact. Contacts also need steady tracking for 4 frames before and 2 after.'],
     ['Sides',`alternate`,'Near/far picked for the whole rally at once. The same side twice within 0.35 s is merged. With a normal gap it marks a likely missed shot.'],
     ['Stuck detections',`${S.stuck_frames??0} frames removed`,'A point that sits still for 0.4 s and then jumps away was never the shuttle.'],
