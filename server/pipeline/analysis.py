@@ -81,6 +81,20 @@ def _hand_ratio(players, f, sx, sy):
     return best
 
 
+def _players_still(players, f, fps, window_s=0.5, max_move_m=0.5):
+    """True if every player seen moved less than max_move_m in the window before frame f
+    (and at least one player on each side was seen): the look of a serve."""
+    a, b = f - int(window_s * fps), f - 2
+    first, last = {}, {}
+    for g in range(a, b + 1):
+        for p in players.get(g, []):
+            first.setdefault(p["id"], (p["side"], p["court"]))
+            last[p["id"]] = p["court"]
+    if not {sd for sd, _ in first.values()} >= {"near", "far"}:
+        return False
+    return all(np.hypot(last[i][0] - c[0], last[i][1] - c[1]) < max_move_m for i, (_, c) in first.items())
+
+
 def _assign_sides(kept, xs, ys, court, players, s):
     """Most likely near/far label for each contact, given that shots alternate sides.
 
@@ -307,6 +321,13 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
             break
         merged.append({"f": kept[drop]["f"], "side": sides[drop], "strength": kept[drop]["strength"], "reason": why})
         del kept[drop]
+
+    # A serve can also be the first *contact* we see even if the shuttle was already being
+    # tracked (tossed, or a false point before it). What gives a serve away is that both
+    # players stand still just before it; in the middle of a rally they're always moving.
+    if start_reason != "serve" and kept and _players_still(players, kept[0]["f"], fps):
+        start_reason = "serve"
+
     hits = []
     for n_, hrec in enumerate(kept):
         i = hrec["i"]
@@ -366,6 +387,9 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     for k, (sm, h) in enumerate(zip(shots, hits)):
         nxt = hits[k + 1]["court"] if k + 1 < len(hits) else landing["court"]
         stroke, why = strokes_mod.classify(sm, h, nxt, prev, h["serve"])
+        # The reply gives the serve away: an overhead return means it was a high (long) serve.
+        if h["serve"] and k + 1 < len(hits) and strokes_mod.height_band(hits[k + 1].get("contact_h")) == "overhead":
+            stroke, why = "long serve", why + ", returned overhead"
         sm["stroke"], sm["stroke_why"] = stroke, why
         sm["contact"] = strokes_mod.height_band(h.get("contact_h"))
         sm["from_zone"] = strokes_mod.zone(abs(h["court"][1] - NET_Y)) if h.get("court") else None
