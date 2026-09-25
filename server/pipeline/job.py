@@ -13,7 +13,7 @@ import uuid
 import cv2
 import numpy as np
 
-from . import analysis, players as players_mod, shuttle
+from . import analysis, players as players_mod, shuttle, view as view_mod
 from .court import Court
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -170,6 +170,7 @@ def _analyse(vid):
     def done(name):
         timings[name] = round(time.time() - timings[name], 1)
 
+    S0 = "Checking camera view and cuts"
     S1, S2, S3 = "Tracking the shuttle (TrackNetV3)", "Finding players (YOLO26-pose)", "Splitting rallies and finding hits"
     shuttle_dir = os.path.join(d, "shuttle")
     cached_shuttle = os.path.exists(shuttle.csv_path(shuttle_dir))
@@ -177,11 +178,21 @@ def _analyse(vid):
     done(S1)
     sh = shuttle.clean(raw, n, width=meta["w"])
 
-    # Player tracking is cached per court calibration (the court decides who counts as a player).
+    # View check and player tracking are cached per court calibration.
     key = hashlib.md5(json.dumps(cfg["corners"]).encode()).hexdigest()[:10]
+    view_file = os.path.join(d, f"view_{key}.npz")
+    prog = stage(S0, 0.6, 0.65)
+    cached_view = os.path.exists(view_file)
+    if cached_view:
+        z = np.load(view_file)
+        vw = {"score": z["score"], "wide": z["wide"], "cuts": z["cuts"].tolist(), "params": json.loads(str(z["params"]))}
+    else:
+        vw = view_mod.analyse(video, court, n, prog)
+        np.savez(view_file, score=vw["score"], wide=vw["wide"], cuts=np.array(vw["cuts"], int), params=json.dumps(vw["params"]))
+    done(S0)
     cache = read_json(vid, "players_raw.json")
     cached_players = bool(cache and cache.get("key") == key)
-    prog = stage(S2, 0.6, 0.95)
+    prog = stage(S2, 0.65, 0.95)
     if cached_players:
         people = {int(f): ps for f, ps in cache["frames"].items()}
         prog(1.0)
@@ -193,7 +204,7 @@ def _analyse(vid):
     kept = players_mod.select_players(people, mode)
 
     stage(S3, 0.95, 1.0)
-    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode)
+    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode, vw)
     done(S3)
 
     write_json(vid, "players.json", {str(f): [[p["id"], 0 if p["side"] == "near" else 1, *p["box"],
@@ -213,7 +224,8 @@ def _analyse(vid):
     for r in rallies:
         in_rally[r["start"]:r["end"] + 1] = True
     pipeline = {
-        "timings_s": timings, "cached": {"shuttle": cached_shuttle, "players": cached_players},
+        "timings_s": timings, "cached": {"shuttle": cached_shuttle, "players": cached_players, "view": cached_view},
+        "view": {"wide_frames": int(vw["wide"].sum()), "cuts": len(vw["cuts"]), **vw["params"]},
         "shuttle": {"frames": n, "detected": int(sh["raw_v"].sum()), "after_cleaning": int(sh["v"].sum()),
                     "outliers_removed": int(sh["outlier"].sum()), "gaps_filled": int(sh["filled"].sum()),
                     "detected_in_rallies": int((sh["raw_v"] & in_rally).sum()), "rally_frames": int(in_rally.sum()),
@@ -230,6 +242,7 @@ def _analyse(vid):
                     "raw_x": arr(sh["raw_x"], sh["raw_v"]), "raw_y": arr(sh["raw_y"], sh["raw_v"]),
                     "outlier": np.flatnonzero(sh["outlier"]).tolist(), "filled": np.flatnonzero(sh["filled"]).tolist()},
         "counts": counts, "candidates": candidates, "pipeline": pipeline,
+        "view": {"score": [round(float(a), 2) for a in vw["score"]], "cuts": [int(c) for c in vw["cuts"]]},
         "rallies": rallies, "summary": analysis.summarise(rallies),
     })
     set_status(vid, state="done", stage="Analysis complete", progress=1)

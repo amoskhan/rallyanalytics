@@ -85,8 +85,25 @@ def _r(v, n=2):
     return None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), n)
 
 
-def find_rallies(sh, players, court: Court, fps, mode):
+def _split(segs, breaks, ok):
+    """Split segments at break frames; trim each piece to frames where ok is True."""
+    out = []
+    for s, e in segs:
+        start = s
+        for b in [b for b in breaks if s <= b <= e] + [e + 1]:
+            idx = np.flatnonzero(ok[start:b])
+            if len(idx):
+                out.append((start + int(idx[0]), start + int(idx[-1])))
+            start = b + 1
+    return out
+
+
+def find_rallies(sh, players, court: Court, fps, mode, view=None):
     v, x, y = sh["v"], sh["x"], sh["y"]
+    n = len(v)
+    wide = view["wide"] if view is not None else np.ones(n, bool)
+    cuts = set(view["cuts"]) if view is not None else set()
+    v_eff = v & wide
     near_px = court.to_image([[3.05, 0]])[0]
     far_px = court.to_image([[3.05, 13.4]])[0]
     court_h = float(abs(near_px[1] - far_px[1]))   # court length in image pixels
@@ -101,7 +118,12 @@ def find_rallies(sh, players, court: Court, fps, mode):
     }
 
     rallies, candidates = [], []
-    for s, e in _segments(v, max_gap=int(params["rally_gap_s"] * fps)):
+    # A rally can't span a camera cut or leave the wide court view.
+    breaks = sorted(cuts | set(np.flatnonzero(~wide).tolist()))
+    segs = _split(_segments(v_eff, max_gap=int(params["rally_gap_s"] * fps)), breaks, v_eff)
+    # Where each wide-view stretch starts (video start or a cut back to the court).
+    view_starts = [0] + [i for i in range(1, n) if wide[i] and (not wide[i - 1] or i in cuts)]
+    for s, e in segs:
         dur = (e - s + 1) / fps
         vis = float(v[s:e + 1].mean())
         xs, ys = _fill(x[s:e + 1]), _fill(y[s:e + 1])
@@ -119,14 +141,18 @@ def find_rallies(sh, players, court: Court, fps, mode):
             candidates.append({**cand, "kept": False, "reason": reason})
             continue
         candidates.append({**cand, "kept": True, "reason": "rally"})
-        rallies.append(_analyse_rally(s, e, sh, players, court, fps, mode, params))
+        vs = max([b for b in view_starts if b <= s], default=0)
+        joined = s - vs < int(0.5 * fps)
+        after = e + 1
+        cut_end = after < n and (after in cuts or not wide[min(n - 1, after + 2)] or any(c in cuts for c in range(after, after + 3)))
+        rallies.append(_analyse_rally(s, e, sh, players, court, fps, mode, params, joined, cut_end))
 
     for i, r in enumerate(rallies):
         r["i"] = i
     return rallies, candidates, params
 
 
-def _analyse_rally(s, e, sh, players, court, fps, mode, params):
+def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cut_end=False):
     v, x, y = sh["v"], sh["x"], sh["y"]
     court_h = params["court_height_px"]
     land_f, settled = _landing_frame(x, y, s, e, fps, params["still_px"])
@@ -167,11 +193,21 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params):
                 changed = True
                 break
 
-    # The serve: which way does the shuttle leave the start of the rally?
+    # How did the rally start? A serve starts from a shuttle held still in the server's hand.
+    k0 = max(2, int(0.2 * fps))
+    still_start = len(xs) > k0 and np.hypot(xs[k0] - xs[0], ys[k0] - ys[0]) < 2 * params["still_px"]
+    if still_start:
+        start_reason = "serve"
+    elif joined:
+        start_reason = "joined mid-rally"      # video or camera started during play
+    else:
+        start_reason = "shuttle appeared"      # possibly a serve the tracker only caught in flight
+    # Which way does the shuttle leave the start of the rally? That side played the first shot.
     k = min(len(ysm) - 1, max(2, int(0.15 * fps)))
-    serve_side = "near" if ysm[k] < ysm[0] else "far"
-    if not events or events[0][0] > int(0.3 * fps) or events[0][1] != serve_side:
-        events.insert(0, (0, serve_side, float("inf")))
+    first_side = "near" if ysm[k] < ysm[0] else "far"
+    if not events or (start_reason != "joined mid-rally"
+                      and (events[0][0] > int(0.3 * fps) or events[0][1] != first_side)):
+        events.insert(0, (0, first_side, float("inf")))
 
     # Enforce alternation: two hits in a row by the same side keep the stronger turn.
     alt, merged = [], []
@@ -189,7 +225,7 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params):
         f = s + i
         pl, d = _hitter(players, f, side, float(xs[i]), float(ys[i]))
         hits.append({"f": int(f), "side": side, "px": [round(float(xs[i]), 1), round(float(ys[i]), 1)],
-                     "prominence": None if p == float("inf") else round(p, 1), "serve": i == 0,
+                     "prominence": None if p == float("inf") else round(p, 1), "serve": i == 0 and start_reason != "joined mid-rally",
                      "player": pl["id"] if pl else None, "court": pl["court"] if pl else None,
                      "hand_dist_px": _r(d, 1)})
 
@@ -198,6 +234,10 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params):
     # The floor projection only means something if the shuttle was near the floor. A last
     # sighting high in the air (lights, out of frame, camera cut) projects far off the court.
     plausible = -2.0 <= cx <= COURT_W + 2.0 and -3.0 <= cy <= 16.4
+    # If the camera cut away before the shuttle came to rest, it was still in the air:
+    # its floor projection isn't where it landed.
+    if cut_end and not settled:
+        plausible = False
     last = hits[-1]["side"]
     if not plausible:
         land_side, is_in, winner, how = None, None, None, "unknown"
@@ -219,7 +259,9 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params):
     return {
         "start": int(s), "end": int(e2), "t0": round(s / fps, 2), "t1": round(e2 / fps, 2),
         "duration": round((e2 - s + 1) / fps, 2),
-        "hits": hits, "shots": len(hits), "server_side": hits[0]["side"], "shot_metrics": shots,
+        "hits": hits, "shots": len(hits), "server_side": hits[0]["side"] if hits[0]["serve"] else None,
+        "shot_metrics": shots, "start_reason": start_reason,
+        "end_reason": "landed" if settled and plausible else "camera cut away" if cut_end else "shuttle lost from view",
         "landing": landing, "winner_side": winner, "how": how,
         "confidence": "high" if settled and plausible and len(hits) >= 2 else "low",
         "movement": _movement(players, s, e2, fps),

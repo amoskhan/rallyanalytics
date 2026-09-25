@@ -448,7 +448,8 @@ function renderDetail(){
   if(!r){$('#detail').innerHTML=`<h2 class="sec">Rally detail</h2><p class="small muted" style="margin:0">Pick a rally from the list, or press ] to jump to the next one.</p>`;return}
   const mv=r.movement.filter(m=>m.metres>0.5).map(m=>`<span class="${m.side==='near'?'ca':'cb'}">${m.side==='near'?nm('near'):nm('far')}${R.res.mode==='doubles'?' #'+m.id:''}</span> ${m.metres} m`).join(' · ');
   $('#detail').innerHTML=`<h2 class="sec">Rally ${r.i+1}</h2>
-    <p style="margin:0 0 8px">${nm(r.server_side)} served. ${r.shots} shots in ${r.duration.toFixed(1)} s (${(r.shots/r.duration).toFixed(1)} shots per second). The last shot ${HOW[r.how]}${r.how==='out'?' at '+fmtLand(r.landing.court):''}.</p>
+    <p style="margin:0 0 8px">${r.server_side?nm(r.server_side)+' served. ':'No serve seen. '}${r.shots} shots in ${r.duration.toFixed(1)} s (${(r.shots/r.duration).toFixed(1)} shots per second). The last shot ${HOW[r.how]}${r.how==='out'?' at '+fmtLand(r.landing.court):''}.</p>
+    ${r.start_reason?`<div class="small" style="margin-bottom:4px"><b>Start:</b> ${esc(r.start_reason)} · <b>End:</b> ${esc(r.end_reason)}</div>`:''}
     <div class="small muted">Distance covered: ${mv||'not enough player data'}</div>
     <div class="row small" style="margin-top:8px;gap:6px">${r.hits.map((h,k)=>`<button class="chip" data-seek="${h.f}">${k+1}. <span class="${h.side==='near'?'ca':'cb'}">${h.side==='near'?nm('near'):nm('far')}</span> ${fmtT(h.f/R.res.meta.fps)}</button>`).join('')}</div>`;
 }
@@ -593,13 +594,13 @@ function renderLab(){
     ${tile('Shuttle found',pct(sh.detected,sh.frames),`TrackNetV3 saw it in ${sh.detected} of ${sh.frames} frames · ${pct(sh.detected_in_rallies,sh.rally_frames)} during rallies`)}
     ${tile('Track cleaning',`${sh.gaps_filled} <span class="small muted">filled</span> · ${sh.outliers_removed} <span class="small muted">removed</span>`,`Gaps up to ${sh.max_gap_frames} frames interpolated. Jumps over ${Math.round(sh.outlier_jump_px)} px removed.`)}
     ${tile('Players tracked',pct(pl.frames_with_player,n),`YOLO26 made ${pl.tracker_ids} track IDs, merged into ${pl.player_slots} player slots (expected ${pl.expected_players})`)}
-    ${tile('Rallies',`${kept} <span class="small muted">of ${res.candidates.length}</span>`,`${res.candidates.length-kept} shuttle-visible stretches rejected. See settings below.`)}
+    ${tile('Rallies',`${kept} <span class="small muted">of ${res.candidates.length}</span>`,`${P.view?`Wide court view in ${pct(P.view.wide_frames,n)} of frames · ${P.view.cuts} camera cuts · `:''}${res.candidates.length-kept} stretches rejected`)}
     ${tile('Hits',hits,`${wob} wobble pairs removed · ${weak} turns under the threshold`)}
     ${tile('Processing',secs?Math.round(secs)+' s':'cached',Object.entries(P.timings_s).map(([k,v])=>`${k.split(' (')[0].replace('Splitting rallies and finding hits','Rallies')}: ${P.cached[k.includes('shuttle')?'shuttle':k.includes('players')?'players':'x']?'cached':v+' s'}`).join(' · '))}
   </div>
   <div class="panel"><h3 class="sec">Coverage timeline <span class="muted small" style="text-transform:none;letter-spacing:0">(whole video)</span></h3>
-    <canvas id="tl" class="chart" height="150"></canvas>
-    <div class="legend"><span><i style="background:var(--cork)"></i>Shuttle detected</span><span><i style="background:var(--good)"></i>Kept after cleaning</span><span><i style="background:#e0b43a"></i>Gap filled</span><span><i style="background:var(--bad)"></i>Outlier removed</span><span><i style="background:var(--ink)"></i>Rally</span><span><i style="background:var(--line)"></i>Rejected stretch</span><span><i style="background:var(--a)"></i>Near</span><span><i style="background:var(--b)"></i>Far</span></div>
+    <canvas id="tl" class="chart" height="170"></canvas>
+    <div class="legend"><span><i style="background:var(--muted)"></i>Wide court view</span><span><i style="background:var(--bad)"></i>Camera cut</span><span><i style="background:var(--cork)"></i>Shuttle detected</span><span><i style="background:var(--good)"></i>Kept after cleaning</span><span><i style="background:#e0b43a"></i>Gap filled</span><span><i style="background:var(--bad)"></i>Outlier removed</span><span><i style="background:var(--ink)"></i>Rally</span><span><i style="background:var(--line)"></i>Rejected stretch</span><span><i style="background:var(--a)"></i>Near</span><span><i style="background:var(--b)"></i>Far</span></div>
   </div>
   <div class="panel" id="sigPanel"></div>
   <div class="labgrid">
@@ -617,13 +618,15 @@ async function rerun(){
   try{await api('/videos/'+S.vid+'/retry',{method:'POST'});toast('Re-running analysis…');openVideo(S.vid)}catch(e){toast(e.message)}
 }
 
-const TL_LEFT=118;
-const TL_ROWS=['Shuttle (raw)','After cleaning','Rallies','Hits','Near players','Far players'];
+const TL_LEFT=118, TL_H=170;
+const TL_ROWS=['Wide court view','Shuttle (raw)','After cleaning','Rallies','Hits','Near players','Far players'];
 function drawTimelineBase(){
   const cv=$('#tl'); if(!cv) return;
-  const res=R.res, n=res.meta.frames, dpr=window.devicePixelRatio||1, W=cv.clientWidth, Hh=150;
+  const res=R.res, n=res.meta.frames, dpr=window.devicePixelRatio||1, W=cv.clientWidth, Hh=TL_H;
   cv.width=W*dpr; cv.height=Hh*dpr; const c=cv.getContext('2d'); c.scale(dpr,dpr);
   const iw=W-TL_LEFT-4, rowH=20, top=8, X=f=>TL_LEFT+f/n*iw;
+  // Row 0: is the calibrated court in view? Row offset for the rest.
+  const R0=res.view?1:0;
   c.font='500 11px IBM Plex Sans, sans-serif'; c.fillStyle=tok('muted');
   TL_ROWS.forEach((l,i)=>c.fillText(l,4,top+i*rowH+13));
   // Per pixel column: fraction of frames with the thing present.
@@ -631,16 +634,18 @@ function drawTimelineBase(){
   const colFrac=test=>{const out=new Float32Array(cols);for(let k=0;k<cols;k++){let a=Math.floor(k*per),b=Math.max(a+1,Math.floor((k+1)*per)),s=0;for(let f=a;f<b;f++)s+=test(f)?1:0;out[k]=s/(b-a)}return out};
   const band=(row,frac,color)=>{c.fillStyle=color;for(let k=0;k<cols;k++){if(frac[k]<=0)continue;c.globalAlpha=.25+.75*frac[k];c.fillRect(TL_LEFT+k,top+row*rowH+3,1.05,rowH-8)}c.globalAlpha=1};
   const sh=res.shuttle;
-  band(0,colFrac(f=>sh.raw_x[f]!=null),tok('cork'));
-  band(1,colFrac(f=>sh.x[f]!=null&&!labSets.filled.has(f)),tok('good'));
-  band(1,colFrac(f=>labSets.filled.has(f)),'#e0b43a');
-  c.fillStyle=tok('bad');for(const f of sh.outlier)c.fillRect(X(f)-1,top+rowH+1,2,rowH-4);
-  for(const cd of res.candidates){c.fillStyle=cd.kept?tok('ink'):tok('line');c.fillRect(X(cd.start),top+2*rowH+3,Math.max(2,X(cd.end)-X(cd.start)),rowH-8)}
-  res.rallies.forEach(r=>{c.fillStyle=tok('bg');c.font='600 10px IBM Plex Sans, sans-serif';if(X(r.end)-X(r.start)>22)c.fillText('R'+(r.i+1),X(r.start)+3,top+2*rowH+13)});
-  for(const r of res.rallies)for(const h of r.hits){c.fillStyle=h.side==='near'?tok('a'):tok('b');c.fillRect(X(h.f)-.5,top+3*rowH+(h.side==='near'?rowH/2:3),1.5,rowH/2-4)}
+  if(res.view){const th=res.pipeline.view.view_threshold;band(0,colFrac(f=>res.view.score[f]>=th),tok('muted'));
+    c.fillStyle=tok('bad');for(const f of res.view.cuts)c.fillRect(X(f)-1,top+1,2.5,rowH-2)}
+  band(R0,colFrac(f=>sh.raw_x[f]!=null),tok('cork'));
+  band(R0+1,colFrac(f=>sh.x[f]!=null&&!labSets.filled.has(f)),tok('good'));
+  band(R0+1,colFrac(f=>labSets.filled.has(f)),'#e0b43a');
+  c.fillStyle=tok('bad');for(const f of sh.outlier)c.fillRect(X(f)-1,top+(R0+1)*rowH+1,2,rowH-4);
+  for(const cd of res.candidates){c.fillStyle=cd.kept?tok('ink'):tok('line');c.fillRect(X(cd.start),top+(R0+2)*rowH+3,Math.max(2,X(cd.end)-X(cd.start)),rowH-8)}
+  res.rallies.forEach(r=>{c.fillStyle=tok('bg');c.font='600 10px IBM Plex Sans, sans-serif';if(X(r.end)-X(r.start)>22)c.fillText('R'+(r.i+1),X(r.start)+3,top+(R0+2)*rowH+13)});
+  for(const r of res.rallies)for(const h of r.hits){c.fillStyle=h.side==='near'?tok('a'):tok('b');c.fillRect(X(h.f)-.5,top+(R0+3)*rowH+(h.side==='near'?rowH/2:3),1.5,rowH/2-4)}
   if(res.counts){
     const exp=res.mode==='singles'?1:2;
-    band(4,colFrac(f=>res.counts.near[f]>=exp),tok('a'));band(5,colFrac(f=>res.counts.far[f]>=exp),tok('b'));
+    band(R0+4,colFrac(f=>res.counts.near[f]>=exp),tok('a'));band(R0+5,colFrac(f=>res.counts.far[f]>=exp),tok('b'));
   }
   LAB.base=c.getImageData(0,0,cv.width,cv.height);
   LAB.tlGeom={X,top,rowH,dpr};
@@ -713,7 +718,7 @@ function labTick(f,force){
   if(!R.res.pipeline||!LAB.base) return;
   const res=R.res;
   // Timeline playhead
-  const cv=$('#tl'); if(cv){const c=cv.getContext('2d');c.putImageData(LAB.base,0,0);const g=LAB.tlGeom;c.save();c.scale(g.dpr,g.dpr);c.strokeStyle=tok('ink');c.lineWidth=1.5;c.beginPath();c.moveTo(g.X(f),2);c.lineTo(g.X(f),148);c.stroke();c.restore()}
+  const cv=$('#tl'); if(cv){const c=cv.getContext('2d');c.putImageData(LAB.base,0,0);const g=LAB.tlGeom;c.save();c.scale(g.dpr,g.dpr);c.strokeStyle=tok('ink');c.lineWidth=1.5;c.beginPath();c.moveTo(g.X(f),2);c.lineTo(g.X(f),TL_H-2);c.stroke();c.restore()}
   const r=labRally(); if(!r) return;
   drawSignal(r,f);
   // Highlight the current shot
