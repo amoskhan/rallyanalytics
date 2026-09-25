@@ -487,15 +487,10 @@ function renderRallyCard(){
 }
 
 // Strokes: the pipeline's guess per shot, or the user's correction.
-// ShuttleSet's 18 shot types, grouped by family for the dropdown and colours.
-const STROKE_GROUPS=[
-  ['Serve',['short service','long service']],
-  ['Net',['net shot','return net','cross-court net shot']],
-  ['Front court',['push','rush']],
-  ['Lift',['lob','defensive return lob']],
-  ['Overhead',['clear','drop','passive drop','smash','wrist smash']],
-  ['Flat',['drive','driven flight','back-court drive','defensive return drive']]];
-const STROKES=STROKE_GROUPS.flatMap(g=>g[1]);
+// ShuttleSet's 18 shot types, in the dataset's own order and wording (no other terms).
+const STROKES=['net shot','return net','smash','wrist smash','lob','defensive return lob','clear','drive','driven flight',
+  'back-court drive','drop','passive drop','push','rush','defensive return drive','cross-court net shot','short service','long service'];
+
 const STROKE_COL={'short service':'#8a8f98','long service':'#6b7280',
   'net shot':'#2f9e8f','return net':'#3fb5a4','cross-court net shot':'#1f7a6e',
   push:'#6aa84f',rush:'#b3265a',
@@ -508,9 +503,8 @@ const strokeKey=(r,k)=>`${r.i}:${r.hits[k].f}`;
 const strokeOf=(r,k)=>R.strokesOv[strokeKey(r,k)]||r.shot_metrics[k]?.stroke||'unknown';
 const strokeFixed=(r,k)=>strokeKey(r,k) in R.strokesOv;
 const cap1=t=>t.charAt(0).toUpperCase()+t.slice(1);
-// Display name: ShuttleSet type, plus "· cross" for a cross-court lob (ShuttleSet keeps
-// cross lobs under "lob" and records the direction separately).
-const strokeLabel=(r,k)=>{const st=strokeOf(r,k),d=r.shot_metrics[k]?.direction;return cap1(st)+(st==='lob'&&d==='cross-court'?' · cross':'')};
+// Display name: the ShuttleSet type exactly as the dataset writes it.
+const strokeLabel=(r,k)=>cap1(strokeOf(r,k));
 let strokeSave=null;
 function saveStrokes(){clearTimeout(strokeSave);strokeSave=setTimeout(()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({strokes:R.strokesOv})}).catch(e=>toast('Could not save: '+e.message)),300)}
 // Live shot log beside the video: played shots in full, the current one highlighted,
@@ -839,7 +833,7 @@ function renderShotTable(r){
     <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Pick the right stroke if the guess is wrong">Stroke</th><th title="Contact height: overhead, side or underarm">Contact</th><th title="Court zone hit from → zone it went to">From → to</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
     <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
       <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
-      <td title="${esc(s.stroke_why||'')}"><select class="strokesel${strokeFixed(r,k)?' fixed':''}" data-stroke="${strokeKey(r,k)}" data-auto="${s.stroke||'unknown'}" style="border-left:4px solid ${STROKE_COL[strokeOf(r,k)]}">${STROKE_GROUPS.map(([g,list])=>`<optgroup label="${g}">${list.map(o=>`<option value="${o}"${o===strokeOf(r,k)?' selected':''}>${cap1(o)}${o===s.stroke&&strokeFixed(r,k)?' (guess)':''}</option>`).join('')}</optgroup>`).join('')}<option value="unknown"${strokeOf(r,k)==='unknown'?' selected':''}>Unknown</option></select></td>
+      <td title="${esc(s.stroke_why||'')}"><select class="strokesel${strokeFixed(r,k)?' fixed':''}" data-stroke="${strokeKey(r,k)}" data-auto="${s.stroke||'unknown'}" style="border-left:4px solid ${STROKE_COL[strokeOf(r,k)]}">${STROKES.map(o=>`<option value="${o}"${o===strokeOf(r,k)?' selected':''}>${cap1(o)}${o===s.stroke&&strokeFixed(r,k)?' (guess)':''}</option>`).join('')}<option value="unknown"${strokeOf(r,k)==='unknown'?' selected':''}>Unknown</option></select></td>
       <td>${s.contact??'–'}</td><td class="small">${s.from_zone??'?'} → ${s.to_zone??'?'}</td>
       <td class="num">${s.flight_s}s</td><td class="num">${s.distance_m??'–'}${s.distance_m!=null?' m':''}</td>
       <td>${bar(s.avg_speed_kmh,h.side==='near'?'a':'b')}</td><td>${bar(s.peak_speed_kmh,h.side==='near'?'a':'b')}</td>
@@ -932,7 +926,7 @@ function renderSettings(){
     ['Contact: weak',`snap ≥ ${A.contact_weak}, hand ≤ ${A.hand_weak}× height`,'A gentler change (soft net shots, serves) needs a hand right at the shuttle.'],
     ['Minimum gap',`${A.hit_min_gap_s} s`,'Two contacts closer than this keep only the sharper one.'],
     ['Inferred shots',`same side ≥ ${A.missed_gap_s??0.9} s apart`,'Adds a shot the video couldn’t see: before the first contact if the shuttle was already flying, or between two same-side contacts far enough apart.'],
-    ['Strokes (ShuttleSet 18)',`wrist overhead ≥ 0.95, underarm < 0.3 · front < 2.5 m, rear > 4.3 m · smash ≥ 55 km/h, wrist smash ≥ 38`,'Contact height is the racket wrist from hips (0) to nose (1). Zones are distance from the net. Overhead: long = clear, to the front = drop (passive when reached late from deep), fast = smash, medium from mid court = wrist smash, at the net = rush. From the front court only four replies exist: net shot, cross-court net shot, lob, or cross lob (a lob that crosses the centre line). Short and quick = net shot, otherwise lob. After a smash or rush: return net, defensive return lob or defensive return drive. Flat from mid court = drive, from the back = back-court drive.'],
+    ['Shot types (ShuttleSet 18)',`wrist ≥ 0.95 of hips-to-nose = above the head · front < 2.5 m, rear > 4.3 m from the net · smash ≥ 55 km/h, wrist smash ≥ 38`,'From the front court: net shot, cross-court net shot or lob only. Wrist above the head: clear, drop, passive drop, smash or wrist smash. Replying to a smash, wrist smash or rush: return net, defensive return lob or defensive return drive. Otherwise: lob, drive, driven flight, back-court drive or push. First shot: short service or long service.'],
     ['Air drag',`turn < ${A.drag_turn_deg??35}° and slowing`,'Braking in a straight line is air drag, not a contact. Contacts also need steady tracking for 4 frames before and 2 after.'],
     ['Sides',`alternate`,'Near/far picked for the whole rally at once. The same side twice within 0.35 s is merged. With a normal gap it marks a likely missed shot.'],
     ['Stuck detections',`${S.stuck_frames??0} frames removed`,'A point that sits still for 0.4 s and then jumps away was never the shuttle.'],

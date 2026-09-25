@@ -15,13 +15,10 @@ mid 2.5-4.3 m, rear > 4.3 m.
 """
 from .court import NET_Y
 
-STROKES = [
-    "short service", "long service",
-    "net shot", "return net", "cross-court net shot",
-    "push", "rush",
-    "lob", "defensive return lob",
-    "clear", "drop", "passive drop", "smash", "wrist smash",
-    "drive", "driven flight", "back-court drive", "defensive return drive",
+STROKES = [  # ShuttleSet's 18 types, in the dataset's order and wording
+    "net shot", "return net", "smash", "wrist smash", "lob", "defensive return lob", "clear",
+    "drive", "driven flight", "back-court drive", "drop", "passive drop", "push", "rush",
+    "defensive return drive", "cross-court net shot", "short service", "long service",
 ]
 ATTACKS = ("smash", "wrist smash", "rush")
 NET_ARRIVALS = ("net shot", "return net", "cross-court net shot", "drop", "passive drop")
@@ -102,10 +99,9 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
     if band is None and zf is None:
         return ("unknown", "no player position or pose at contact")
 
-    # --- front court: only four replies are possible from here. A lob (straight or cross;
-    # ShuttleSet keeps cross lobs as "lob" and records the direction separately), or a net
-    # shot, straight or cross-court. A net shot stays short and quick; anything longer
-    # or higher is a lob.
+    # --- front court: only net shot, cross-court net shot or lob are possible from here.
+    # Short and quick is a net shot (cross-court if it crosses the centre line); anything
+    # longer or higher is a lob.
     if zf == "front":
         if zt == "front" or (t < 0.9 and arc < 30 and zt != "rear"):
             return why("cross-court net shot" if cross else "net shot")
