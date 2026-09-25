@@ -81,6 +81,15 @@ def _hand_ratio(players, f, sx, sy):
     return best
 
 
+def _wrist_height(players, f, pid, k=2):
+    """Highest racket-wrist height of player pid within +-k frames of contact (see strokes.wrist_height)."""
+    if pid is None:
+        return None
+    vals = [strokes_mod.wrist_height(p) for g in range(f - k, f + k + 1) for p in players.get(g, []) if p["id"] == pid]
+    vals = [v for v in vals if v is not None]
+    return max(vals) if vals else None
+
+
 def _players_still(players, f, fps, window_s=0.5, max_move_m=0.5):
     """True if every player seen moved less than max_move_m in the window before frame f
     (and at least one player on each side was seen): the look of a serve."""
@@ -338,7 +347,7 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                      "player": hrec["pl"]["id"] if hrec["pl"] else None,
                      "court": hrec["pl"]["court"] if hrec["pl"] else None,
                      "hand_dist_px": hrec["hand_px"],
-                     "contact_h": strokes_mod.contact_height(hrec["pl"], float(ys[i]))})
+                     "contact_h": _wrist_height(players, hrec["f"], hrec["pl"]["id"] if hrec["pl"] else None)})
     # Shots that must have happened but weren't seen:
     # - the shuttle was already flying when tracking began, so someone hit it;
     # - the same side twice with a long gap: the other side played in between
@@ -387,9 +396,6 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     for k, (sm, h) in enumerate(zip(shots, hits)):
         nxt = hits[k + 1]["court"] if k + 1 < len(hits) else landing["court"]
         stroke, why = strokes_mod.classify(sm, h, nxt, prev, h["serve"])
-        # The reply gives the serve away: an overhead return means it was a high (long) serve.
-        if h["serve"] and k + 1 < len(hits) and strokes_mod.height_band(hits[k + 1].get("contact_h")) == "overhead":
-            stroke, why = "long serve", why + ", returned overhead"
         sm["stroke"], sm["stroke_why"] = stroke, why
         sm["contact"] = strokes_mod.height_band(h.get("contact_h"))
         sm["from_zone"] = strokes_mod.zone(abs(h["court"][1] - NET_Y)) if h.get("court") else None

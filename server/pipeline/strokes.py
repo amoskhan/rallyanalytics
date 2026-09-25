@@ -14,7 +14,7 @@ STROKES = ["short serve", "long serve", "clear", "smash", "drop", "net shot", "l
            "push", "drive", "net kill", "block"]
 
 FRONT, REAR = 2.5, 4.3          # metres from the net
-OVERHEAD, UNDERARM = 0.85, 0.35 # contact height as a fraction of hip-to-head height
+OVERHEAD, UNDERARM = 0.95, 0.3  # racket-wrist height: 0 = hips, 1 = nose
 
 
 def zone(depth):
@@ -23,17 +23,33 @@ def zone(depth):
     return "front" if depth < FRONT else "rear" if depth > REAR else "mid"
 
 
-def contact_height(player, sy):
-    """How high the contact was: 0 = hips, 1 = top of the head (box top), >1 above it."""
+def wrist_height(player):
+    """Height of the player's highest wrist: 0 = hips, 1 = nose, >1 above the head.
+
+    Uses the body, not the shuttle: the shuttle's position in the picture depends on its
+    depth, so a shuttle over the net can look "above the head" of a player behind it.
+    Players facing away from the camera hide their nose, so the head is estimated from
+    the shoulders (the nose sits about 1.35x the hip-to-shoulder height above the hips).
+    """
     if not player:
         return None
-    box, kps = player["box"], player["kps"]
-    hips = [kps[i][1] for i in (11, 12) if kps[i][2] > 0.3]
-    hip_y = sum(hips) / len(hips) if hips else box[1] + 0.55 * (box[3] - box[1])
-    top = box[1]
-    if hip_y - top < 5:
+    kps = player["kps"]
+    ok = lambda i: kps[i][2] > 0.3
+    hips = [kps[i][1] for i in (11, 12) if ok(i)]
+    wrists = [kps[i][1] for i in (9, 10) if ok(i)]
+    if not hips or not wrists:
         return None
-    return round((hip_y - sy) / (hip_y - top), 2)
+    hip_y = sum(hips) / len(hips)
+    if ok(0):
+        head_y = kps[0][1]
+    else:
+        sh = [kps[i][1] for i in (5, 6) if ok(i)]
+        if not sh:
+            return None
+        head_y = hip_y - 1.35 * (hip_y - sum(sh) / len(sh))
+    if hip_y - head_y < 5:
+        return None
+    return round((hip_y - min(wrists)) / (hip_y - head_y), 2)
 
 
 def height_band(h):
@@ -49,13 +65,15 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
     zf, zt = zone(from_d), zone(to_d)
     band = height_band(hit.get("contact_h"))
     t = shot["flight_s"]
-    fast = (shot.get("avg_speed_kmh") or 0) >= 60 or (t < 0.55 and (shot.get("distance_m") or 0) > 4.5)
+    fast = (shot.get("avg_speed_kmh") or 0) >= 50 or (t < 0.6 and (shot.get("distance_m") or 0) > 4.5)
     facts = [f for f in (band, f"from the {zf} court" if zf else None,
                          f"to the {zt} court" if zt else None, f"{t:.2f} s flight") if f]
     why = lambda s: (s, ", ".join(facts))
 
     if is_serve:
-        return why("long serve" if (zt == "rear" or t >= 1.0) else "short serve")
+        # Short serves skim the net: low arc, quick flight. Long serves go high to the back.
+        high = (shot.get("arc_pct") or 0) >= 35 or t >= 1.1 or zt == "rear"
+        return why("long serve" if high else "short serve")
     if band is None and zf is None:
         return ("unknown", "no player position or pose at contact")
 
@@ -68,7 +86,8 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
             return why("smash")
         if zt == "front":
             return why("drop")
-        return why("smash" if t < 0.75 else "clear" if t >= 1.0 else "drop")
+        # Overhead but not fast: long and high is a clear, otherwise a (slow or fast) drop.
+        return why("clear" if t >= 0.95 else "drop")
 
     if band == "underarm":
         if prev_stroke in ("smash", "net kill") and zt == "front":
@@ -94,6 +113,9 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
         return why("drive")
     if zt == "front":
         return why("drop" if band != "underarm" else "block")
-    if zt == "rear":
-        return why("clear" if t >= 0.9 else "drive")
+    if t >= 0.95:
+        # A long flight from side-arm height is a high shot: clear from the back, lift otherwise.
+        return why("clear" if zf == "rear" else "lift")
+    if zf == "mid" and (shot.get("avg_speed_kmh") or 0) < 40:
+        return why("push")
     return why("drive")
