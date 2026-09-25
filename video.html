@@ -787,6 +787,7 @@ function renderSettings(){
     ['Contact: strong',`snap ≥ ${A.contact_strong}, hand ≤ ${A.hand_strong}× height`,'A sharp velocity change with a player’s hand reasonably near.'],
     ['Contact: weak',`snap ≥ ${A.contact_weak}, hand ≤ ${A.hand_weak}× height`,'A gentler change (soft net shots, serves) needs a hand right at the shuttle.'],
     ['Minimum gap',`${A.hit_min_gap_s} s`,'Two contacts closer than this keep only the sharper one.'],
+    ['Air drag',`turn < ${A.drag_turn_deg??35}° and slowing`,'Braking in a straight line is air drag, not a contact. Contacts also need steady tracking for 4 frames before and 2 after.'],
     ['Sides',`alternate`,'Near/far picked for the whole rally at once. The same side twice within 0.35 s is merged. With a normal gap it marks a likely missed shot.'],
     ['Stuck detections',`${S.stuck_frames??0} frames removed`,'A point that sits still for 0.4 s and then jumps away was never the shuttle.'],
     ['Landing',`still for 0.1 s, moving < ${Math.round(A.still_px)} px`,'The final motionless stretch is the landing. A last sighting that projects off the court is marked unknown.'],

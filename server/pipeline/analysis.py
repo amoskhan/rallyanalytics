@@ -170,6 +170,7 @@ def find_rallies(sh, players, court: Court, fps, mode, view=None):
     params = {
         "rally_gap_s": 0.8, "min_rally_s": 1.2, "min_visible_frac": 0.6, "min_travel_courts": 0.8,
         "contact_strong": 0.8, "contact_weak": 0.5, "hand_strong": 0.7, "hand_weak": 0.3, "hit_min_gap_s": 0.25,
+        "drag_turn_deg": 35,
         "smooth_window_frames": max(5, int(fps * 0.17) | 1), "still_px": round(still_px, 1),
         "court_height_px": round(court_h, 1),
     }
@@ -224,9 +225,24 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     k = 2
     vx, vy = np.diff(xs), np.diff(ys)
     snap = np.zeros(len(xs))                   # velocity change, court heights per second
+    # Only where the shuttle was really seen on both sides of the frame. At the start or end
+    # of tracking (or across a gap) the filled-in track goes from still to moving, which
+    # looks exactly like a contact but isn't one.
+    # The first frames after tracking (re)starts are shaky, so also need 2 extra frames before.
+    seen_all = sh["v"]
     for t in range(k, len(xs) - k):
+        g = s + t
+        if g - k - 2 < 0 or not seen_all[g - k - 2:g + k + 1].all():
+            continue
         bx, by = vx[t - k:t].mean(), vy[t - k:t].mean()
         ax, ay = vx[t:t + k].mean(), vy[t:t + k].mean()
+        nb, na = np.hypot(bx, by), np.hypot(ax, ay)
+        if nb > 0 and na > 0:
+            turn = np.degrees(np.arccos(np.clip((ax * bx + ay * by) / (na * nb), -1, 1)))
+            # Slowing down in a straight line is air drag (shuttles brake hard after a shot),
+            # not a contact. Contacts turn the shuttle or speed it up.
+            if turn < params["drag_turn_deg"] and na <= nb:
+                continue
         snap[t] = np.hypot(ax - bx, ay - by) / court_h * fps
     peaks, props = find_peaks(snap, height=params["contact_weak"], distance=max(2, int(0.2 * fps)))
 
