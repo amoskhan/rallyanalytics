@@ -508,6 +508,9 @@ const strokeKey=(r,k)=>`${r.i}:${r.hits[k].f}`;
 const strokeOf=(r,k)=>R.strokesOv[strokeKey(r,k)]||r.shot_metrics[k]?.stroke||'unknown';
 const strokeFixed=(r,k)=>strokeKey(r,k) in R.strokesOv;
 const cap1=t=>t.charAt(0).toUpperCase()+t.slice(1);
+// Display name: ShuttleSet type, plus "· cross" for a cross-court lob (ShuttleSet keeps
+// cross lobs under "lob" and records the direction separately).
+const strokeLabel=(r,k)=>{const st=strokeOf(r,k),d=r.shot_metrics[k]?.direction;return cap1(st)+(st==='lob'&&d==='cross-court'?' · cross':'')};
 let strokeSave=null;
 function saveStrokes(){clearTimeout(strokeSave);strokeSave=setTimeout(()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({strokes:R.strokesOv})}).catch(e=>toast('Could not save: '+e.message)),300)}
 // Live shot log beside the video: played shots in full, the current one highlighted,
@@ -517,7 +520,7 @@ function renderShotLog(r){
   if(!r){el.innerHTML='';return}
   const fps=R.res.meta.fps, sm=r.shot_metrics||[];
   el.innerHTML=`<div class="tbl-wrap log"><table class="t" id="logTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th>Stroke</th><th title="Average speed to the next contact">km/h</th></tr></thead><tbody>${r.hits.map((h,k)=>{const st=strokeOf(r,k),m=sm[k]||{};
-    return `<tr data-k="${k}" data-seekf="${h.f}" class="future"><td class="num">${k+1}</td><td class="num">${fmtT(h.f/fps)}</td><td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?esc(slotName(h.player)):(h.side==='near'?nm('near'):nm('far'))}</span></td><td><span class="sdot" style="background:${STROKE_COL[st]}"></span>${cap1(st)}${strokeFixed(r,k)?' <span class="muted">✓</span>':''}</td><td class="num">${m.avg_speed_kmh??'–'}</td></tr>`}).join('')}</tbody></table></div>
+    return `<tr data-k="${k}" data-seekf="${h.f}" class="future"><td class="num">${k+1}</td><td class="num">${fmtT(h.f/fps)}</td><td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?esc(slotName(h.player)):(h.side==='near'?nm('near'):nm('far'))}</span></td><td><span class="sdot" style="background:${STROKE_COL[st]}"></span>${strokeLabel(r,k)}${strokeFixed(r,k)?' <span class="muted">✓</span>':''}</td><td class="num">${m.avg_speed_kmh??'–'}</td></tr>`}).join('')}</tbody></table></div>
   ${r.missed&&r.missed.length?`<p class="small muted" style="margin:6px 0 0">Plus ${r.missed.length} shot${r.missed.length>1?'s':''} the camera couldn't see (inferred, not listed).</p>`:''}`;
   $('#logTbl').onclick=e=>{const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=Math.max(0,+tr.dataset.seekf/fps-0.3)}};
   R.live.logK=-2;
@@ -575,7 +578,7 @@ function renderLive(r,k){
   s+=`<text x="0" y="-0.3" class="side">${nm('far')}</text><text x="0" y="14.1" class="side">${nm('near')}</text></svg>`;
   const L=legs[k];
   const cap=k<0?'Play the rally: each shot appears on the court as it is hit.'
-    :`<b>Shot ${k+1}</b> · ${L.player!=null?esc(slotName(L.player)):(L.side==='near'?nm('near'):nm('far'))} · <b style="color:${STROKE_COL[strokeOf(r,k)]}">${cap1(strokeOf(r,k))}</b> · ${L.last?(r.landing.court?(r.landing.in?'landed in':'landed out'):'landing not seen'):'to the next contact'}`;
+    :`<b>Shot ${k+1}</b> · ${L.player!=null?esc(slotName(L.player)):(L.side==='near'?nm('near'):nm('far'))} · <b style="color:${STROKE_COL[strokeOf(r,k)]}">${strokeLabel(r,k)}</b> · ${L.last?(r.landing.court?(r.landing.in?'landed in':'landed out'):'landing not seen'):'to the next contact'}`;
   el.innerHTML=s+`<p class="small" style="margin:6px 0 0">${cap}</p><p class="small muted" style="margin:2px 0 0">Arrows run from where each shot was played to where it was played next. The last one ends where the rally ended (green = in, red = out). Big dots are the players right now.</p>`;
 }
 function renderPlayerStats(r){
@@ -680,7 +683,7 @@ function drawOverlay(){
       ctx.strokeStyle=`rgba(255,255,255,${a})`;ctx.lineWidth=lw*1.5;ctx.beginPath();ctx.arc(h.px[0],h.px[1],lw*(8+(f-h.f)/2),0,7);ctx.stroke();
     }
     for(let k=0;k<r.hits.length;k++){const h=r.hits[k];if(f<h.f||f>h.f+meta.fps*0.9)continue;
-      const t=cap1(strokeOf(r,k)).toUpperCase();ctx.font=`800 ${lw*11}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(t).width;
+      const t=strokeLabel(r,k).toUpperCase();ctx.font=`800 ${lw*11}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(t).width;
       const x=Math.min(W-tw-lw*8,Math.max(lw*4,h.px[0]-tw/2)),y=Math.max(lw*24,h.px[1]-lw*18);
       ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(x-lw*4,y-lw*11,tw+lw*8,lw*14);ctx.fillStyle=STROKE_COL[strokeOf(r,k)]||'#fff';ctx.fillText(t,x,y)}
     if(f>=r.landing.f&&f<=r.end+meta.fps){
@@ -929,7 +932,7 @@ function renderSettings(){
     ['Contact: weak',`snap ≥ ${A.contact_weak}, hand ≤ ${A.hand_weak}× height`,'A gentler change (soft net shots, serves) needs a hand right at the shuttle.'],
     ['Minimum gap',`${A.hit_min_gap_s} s`,'Two contacts closer than this keep only the sharper one.'],
     ['Inferred shots',`same side ≥ ${A.missed_gap_s??0.9} s apart`,'Adds a shot the video couldn’t see: before the first contact if the shuttle was already flying, or between two same-side contacts far enough apart.'],
-    ['Strokes (ShuttleSet 18)',`wrist overhead ≥ 0.95, underarm < 0.3 · front < 2.5 m, rear > 4.3 m · smash ≥ 55 km/h, wrist smash ≥ 38`,'Contact height is the racket wrist from hips (0) to nose (1). Zones are distance from the net. Overhead: long = clear, to the front = drop (passive when reached late from deep), fast = smash, medium from mid court = wrist smash, at the net = rush. Front court: to the front = net shot (return net after a net shot or drop, cross-court if it crosses), high = lob, flat = push or driven flight. After a smash or rush: return net, defensive return lob or defensive return drive. Flat from mid court = drive, from the back = back-court drive.'],
+    ['Strokes (ShuttleSet 18)',`wrist overhead ≥ 0.95, underarm < 0.3 · front < 2.5 m, rear > 4.3 m · smash ≥ 55 km/h, wrist smash ≥ 38`,'Contact height is the racket wrist from hips (0) to nose (1). Zones are distance from the net. Overhead: long = clear, to the front = drop (passive when reached late from deep), fast = smash, medium from mid court = wrist smash, at the net = rush. From the front court only four replies exist: net shot, cross-court net shot, lob, or cross lob (a lob that crosses the centre line). Short and quick = net shot, otherwise lob. After a smash or rush: return net, defensive return lob or defensive return drive. Flat from mid court = drive, from the back = back-court drive.'],
     ['Air drag',`turn < ${A.drag_turn_deg??35}° and slowing`,'Braking in a straight line is air drag, not a contact. Contacts also need steady tracking for 4 frames before and 2 after.'],
     ['Sides',`alternate`,'Near/far picked for the whole rally at once. The same side twice within 0.35 s is merged. With a normal gap it marks a likely missed shot.'],
     ['Stuck detections',`${S.stuck_frames??0} frames removed`,'A point that sits still for 0.4 s and then jumps away was never the shuttle.'],

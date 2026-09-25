@@ -102,10 +102,17 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
     if band is None and zf is None:
         return ("unknown", "no player position or pose at contact")
 
+    # --- front court: only four replies are possible from here. A lob (straight or cross;
+    # ShuttleSet keeps cross lobs as "lob" and records the direction separately), or a net
+    # shot, straight or cross-court. A net shot stays short and quick; anything longer
+    # or higher is a lob.
+    if zf == "front":
+        if zt == "front" or (t < 0.9 and arc < 30 and zt != "rear"):
+            return why("cross-court net shot" if cross else "net shot")
+        return why("lob")
+
     # --- overhead: clear, drop, passive drop, smash, wrist smash (rush at the net)
     if band == "overhead":
-        if zf == "front" and (kmh >= WRIST_SMASH_KMH or t < 0.45):
-            return why("rush")
         if kmh >= SMASH_KMH or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
             return why("smash")
         if kmh >= WRIST_SMASH_KMH and t < 0.8 and zf != "rear":
@@ -117,27 +124,13 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
             return why("passive drop")
         return why("drop")
 
-    # --- replies to an attack: defensive lob / drive, or a block to the net (return net)
-    if answering_attack and zf != "front":
+    # --- replies to an attack from mid/rear: defensive lob / drive, or a block to the net
+    if answering_attack:
         if zt == "front":
             return why("return net")
         if t >= 0.9 or arc >= 30:
             return why("defensive return lob")
         return why("defensive return drive")
-
-    # --- front court: net shots, push, rush, lob
-    if zf == "front":
-        if zt == "front" and t < 0.9:
-            if cross:
-                return why("cross-court net shot")
-            return why("return net" if answering_net else "net shot")
-        if t >= 0.9 or zt == "rear" or arc >= 30:
-            return why("lob")
-        if band == "side" and kmh >= 45:
-            return why("rush")
-        if flat:
-            return why("driven flight")
-        return why("push")
 
     # --- mid / rear court, below the head
     if band == "underarm" and (t >= 0.9 or arc >= 30):
