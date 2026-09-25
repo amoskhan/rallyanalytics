@@ -132,6 +132,7 @@ def players(vid: str):
 class ReviewIn(BaseModel):
     rallies: list[dict] | None = None
     names: dict[str, str] | None = None     # slot -> name: near1, near2, far1, far2
+    strokes: dict[str, str] | None = None   # "<rally>:<frame>" -> stroke, the user's corrections
 
 
 @app.put("/api/videos/{vid}/review")
@@ -144,6 +145,8 @@ def save_review(vid: str, body: ReviewIn):
         cur["rallies"] = body.rallies
     if body.names is not None:
         cur["names"] = {k: str(v)[:24] for k, v in body.names.items() if k in ("near1", "near2", "far1", "far2")}
+    if body.strokes is not None:
+        cur["strokes"] = {k: str(v)[:20] for k, v in body.strokes.items()}
     job.write_json(vid, "review.json", cur)
     return {"ok": True}
 

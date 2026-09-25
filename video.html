@@ -78,6 +78,9 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 .rallycard .winner{font-family:var(--display);font-size:26px;font-weight:700;line-height:1.15;margin:6px 0 2px}
 .rallycard .winner span{font-size:16px;font-weight:500;color:var(--muted)}
 .rallycard .shotline{margin:8px 0 6px;font-size:18px}
+.sdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
+select.strokesel{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 4px}
+select.strokesel.fixed{font-weight:600;background:var(--surface-2)}
 .livemap{width:100%;max-width:300px;display:block;margin:0 auto}
 .livemap .mat{fill:var(--court)} .livemap .cl{stroke:var(--court-line);stroke-width:.05;fill:none}
 .livemap .net{stroke:var(--court-line);stroke-width:.09;stroke-dasharray:.08 .1}
@@ -376,7 +379,7 @@ let R=null; // {res, players, review, sel, show}
 async function renderReview(v){
   const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
   const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
-  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),live:{k:-2,r:-1}};
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),strokesOv:review.strokes||{},live:{k:-2,r:-1}};
   const meta=res.meta, dbl=res.mode==='doubles';
   const nameField=(key,label,cls)=>`<div class="field"><span class="${cls}">${label}</span><input id="nm_${key}" data-name="${key}" value="${esc(R.names[key])}" maxlength="24"></div>`;
   $('#app').innerHTML=`<div class="ws review">
@@ -409,6 +412,7 @@ async function renderReview(v){
         <p class="small muted" style="margin:6px 0 10px">${dbl?'Player 1 is the one on the left (from the camera) at the start of the video. If a name lands on the wrong player, swap the names.':'Near is the player closest to the camera at the start.'}</p>
         <div id="playerStats"></div>
       </div>
+      <div class="panel"><h2 class="sec">Strokes · this rally</h2><div id="strokeStats"></div></div>
     </aside></div>
     <section class="lab" id="lab"></section>`;
   const vid=$('#vid'), ctx=sizeCanvas(meta);
@@ -476,6 +480,29 @@ function renderRallyCard(){
   setTimeout(()=>{if(R&&R.vid)liveTick(Math.round(R.vid.currentTime*R.res.meta.fps))},0);
 }
 
+// Strokes: the pipeline's guess per shot, or the user's correction.
+const STROKES=['short serve','long serve','clear','smash','drop','net shot','lift','push','drive','net kill','block'];
+const STROKE_COL={'short serve':'#8a8f98','long serve':'#8a8f98',clear:'#4c8dd6',smash:'#d64545',drop:'#9b6ad6',
+  'net shot':'#2f9e8f',lift:'#d6a13a',push:'#6aa84f',drive:'#e07a2e','net kill':'#b3265a',block:'#5f7a8a',unknown:'#999'};
+const strokeKey=(r,k)=>`${r.i}:${r.hits[k].f}`;
+const strokeOf=(r,k)=>R.strokesOv[strokeKey(r,k)]||r.shot_metrics[k]?.stroke||'unknown';
+const strokeFixed=(r,k)=>strokeKey(r,k) in R.strokesOv;
+const cap1=t=>t.charAt(0).toUpperCase()+t.slice(1);
+let strokeSave=null;
+function saveStrokes(){clearTimeout(strokeSave);strokeSave=setTimeout(()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({strokes:R.strokesOv})}).catch(e=>toast('Could not save: '+e.message)),300)}
+function renderStrokeStats(r){
+  const el=$('#strokeStats'); if(!el) return;
+  if(!r||!r.shot_metrics||!r.shot_metrics[0]||r.shot_metrics[0].stroke==null){el.innerHTML='<p class="small muted" style="margin:0">Re-run the analysis to classify strokes.</p>';return}
+  // Rows = strokes played in this rally; columns = players (singles) or sides (doubles).
+  const dbl=R.res.mode==='doubles', who=h=>dbl?h.side:(h.player!=null?h.player:(h.side==='near'?0:2));
+  const cols=dbl?[['near',nm('near'),tok('a')],['far',nm('far'),tok('b')]]:[[0,esc(slotName(0)),tok('a')],[2,esc(slotName(2)),tok('b')]];
+  const count={};r.hits.forEach((h,k)=>{const st=strokeOf(r,k),w=who(h);(count[st]=count[st]||{})[w]=(count[st][w]||0)+1});
+  const order=STROKES.concat(['unknown']).filter(st=>count[st]);
+  const mx=Math.max(1,...order.flatMap(st=>cols.map(c=>count[st][c[0]]||0)));
+  el.innerHTML=`<table class="t"><thead><tr><th>Stroke</th>${cols.map(c=>`<th style="color:${c[2]}">${c[1]}</th>`).join('')}</tr></thead><tbody>${order.map(st=>`<tr><td><span class="sdot" style="background:${STROKE_COL[st]}"></span>${cap1(st)}</td>${cols.map(c=>{const v=count[st][c[0]]||0;return `<td><div class="cell"><span class="bar" style="width:${Math.round(v/mx*48)}px;background:${c[2]}"></span>${v||''}</div></td>`}).join('')}</tr>`).join('')}</tbody></table>
+  <p class="small muted" style="margin:6px 0 0">Guessed from contact height, where each shot was hit from and went to, and its flight time. Correct any stroke in the shot table below the video. Corrections are saved and used to improve the rules.</p>`;
+}
+
 // Court map beside the video. Each shot appears as it's hit: an arrow from where it was
 // played to where it went (the next contact, or the landing for the last shot).
 const SLOT_KEYS=['near1','near2','far1','far2'];
@@ -509,7 +536,7 @@ function renderLive(r,k){
   s+=`<text x="0" y="-0.3" class="side">${nm('far')}</text><text x="0" y="14.1" class="side">${nm('near')}</text></svg>`;
   const L=legs[k];
   const cap=k<0?'Play the rally: each shot appears on the court as it is hit.'
-    :`<b>Shot ${k+1}</b> · ${L.player!=null?esc(slotName(L.player)):(L.side==='near'?nm('near'):nm('far'))} · ${L.last?(r.landing.court?(r.landing.in?'landed in':'landed out'):'landing not seen'):'to the next contact'}`;
+    :`<b>Shot ${k+1}</b> · ${L.player!=null?esc(slotName(L.player)):(L.side==='near'?nm('near'):nm('far'))} · <b style="color:${STROKE_COL[strokeOf(r,k)]}">${cap1(strokeOf(r,k))}</b> · ${L.last?(r.landing.court?(r.landing.in?'landed in':'landed out'):'landing not seen'):'to the next contact'}`;
   el.innerHTML=s+`<p class="small" style="margin:6px 0 0">${cap}</p><p class="small muted" style="margin:2px 0 0">Arrows run from where each shot was played to where it was played next. The last one ends where the rally ended (green = in, red = out). Big dots are the players right now.</p>`;
 }
 function renderPlayerStats(r){
@@ -523,7 +550,7 @@ function renderPlayerStats(r){
 function liveTick(f){
   const r=currentRally(); if(!r) return;
   let k=-1;for(let i=0;i<r.hits.length;i++)if(r.hits[i].f<=f)k=i;
-  if(R.live.r!==r.i){R.live.r=r.i;renderRallyCard();renderPlayerStats(r)}
+  if(R.live.r!==r.i){R.live.r=r.i;renderRallyCard();renderPlayerStats(r);renderStrokeStats(r)}
   if(k!==R.live.k){R.live.k=k;renderLive(r,k);
     const now=$('#shotNow'),of=$('#shotOf');
     if(now){const total=r.shots_estimated??r.shots;now.textContent=k<0?'–':`Shot ${k+1}`;of.textContent=`of ${r.shots} seen${r.missed&&r.missed.length?` (${total} with inferred)`:''}`}}
@@ -612,6 +639,10 @@ function drawOverlay(){
       const a=1-(f-h.f)/(meta.fps*0.8);
       ctx.strokeStyle=`rgba(255,255,255,${a})`;ctx.lineWidth=lw*1.5;ctx.beginPath();ctx.arc(h.px[0],h.px[1],lw*(8+(f-h.f)/2),0,7);ctx.stroke();
     }
+    for(let k=0;k<r.hits.length;k++){const h=r.hits[k];if(f<h.f||f>h.f+meta.fps*0.9)continue;
+      const t=cap1(strokeOf(r,k)).toUpperCase();ctx.font=`800 ${lw*11}px IBM Plex Sans, sans-serif`;const tw=ctx.measureText(t).width;
+      const x=Math.min(W-tw-lw*8,Math.max(lw*4,h.px[0]-tw/2)),y=Math.max(lw*24,h.px[1]-lw*18);
+      ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(x-lw*4,y-lw*11,tw+lw*8,lw*14);ctx.fillStyle=STROKE_COL[strokeOf(r,k)]||'#fff';ctx.fillText(t,x,y)}
     if(f>=r.landing.f&&f<=r.end+meta.fps){
       const[lx,ly]=r.landing.px;ctx.strokeStyle=r.landing.in?'#4ee08a':'#ff5a4a';ctx.lineWidth=lw*1.5;
       ctx.beginPath();ctx.moveTo(lx-lw*7,ly-lw*7);ctx.lineTo(lx+lw*7,ly+lw*7);ctx.moveTo(lx+lw*7,ly-lw*7);ctx.lineTo(lx-lw*7,ly+lw*7);ctx.stroke();
@@ -762,14 +793,20 @@ function renderShotTable(r){
   const sm=r.shot_metrics, mx=Math.max(1,...sm.map(s=>s.avg_speed_kmh||0),...sm.map(s=>s.peak_speed_kmh||0));
   const bar=(v,cls)=>v==null?'<span class="muted">–</span>':`<div class="cell"><span class="bar ${cls}" style="width:${Math.round(v/mx*50)}px"></span>${v}</div>`;
   $('#shotPanel').innerHTML=`<h3 class="sec">Shot by shot · Rally ${r.i+1}</h3>
-    <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Pick the right stroke if the guess is wrong">Stroke</th><th title="Contact height: overhead, side or underarm">Contact</th><th title="Court zone hit from → zone it went to">From → to</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
     <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
       <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
+      <td title="${esc(s.stroke_why||'')}"><select class="strokesel${strokeFixed(r,k)?' fixed':''}" data-stroke="${strokeKey(r,k)}" data-auto="${s.stroke||'unknown'}" style="border-left:4px solid ${STROKE_COL[strokeOf(r,k)]}">${STROKES.concat(['unknown']).map(o=>`<option value="${o}"${o===strokeOf(r,k)?' selected':''}>${cap1(o)}${o===s.stroke&&strokeFixed(r,k)?' (guess)':''}</option>`).join('')}</select></td>
+      <td>${s.contact??'–'}</td><td class="small">${s.from_zone??'?'} → ${s.to_zone??'?'}</td>
       <td class="num">${s.flight_s}s</td><td class="num">${s.distance_m??'–'}${s.distance_m!=null?' m':''}</td>
       <td>${bar(s.avg_speed_kmh,h.side==='near'?'a':'b')}</td><td>${bar(s.peak_speed_kmh,h.side==='near'?'a':'b')}</td>
       <td class="num">${s.arc_pct??'–'}${s.arc_pct!=null?'%':''}</td><td>${s.direction??'–'}</td><td class="num">${h.hand_dist_px??'–'}</td><td class="num">${h.strength??h.prominence??'–'}</td><td class="num">${h.hand_ratio??'–'}</td></tr>`}).join('')}</tbody></table></div>
     <p class="small muted" style="margin:8px 0 0">*Peak speed comes from the shuttle's movement in the picture at the hitter's depth. It's only a rough guide, because the shuttle's height above the floor isn't known. Average speed uses the players' floor positions, so it's more reliable but underestimates curved flights.</p>`;
-  $('#shotTbl').onclick=e=>{const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
+  $('#shotTbl').onchange=e=>{const sel=e.target.closest('select[data-stroke]');if(!sel)return;
+    if(sel.value===sel.dataset.auto)delete R.strokesOv[sel.dataset.stroke];else R.strokesOv[sel.dataset.stroke]=sel.value;
+    saveStrokes();sel.classList.toggle('fixed',sel.dataset.stroke in R.strokesOv);sel.style.borderLeftColor=STROKE_COL[sel.value];
+    const rr=labRally();renderStrokeStats(rr);R.live.k=-2;liveTick(Math.round(R.vid.currentTime*R.res.meta.fps));toast('Stroke saved')};
+  $('#shotTbl').onclick=e=>{if(e.target.closest('select'))return;const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
 }
 
 // Keep a row visible inside its own scroll box without moving the page.
@@ -852,6 +889,7 @@ function renderSettings(){
     ['Contact: weak',`snap ≥ ${A.contact_weak}, hand ≤ ${A.hand_weak}× height`,'A gentler change (soft net shots, serves) needs a hand right at the shuttle.'],
     ['Minimum gap',`${A.hit_min_gap_s} s`,'Two contacts closer than this keep only the sharper one.'],
     ['Inferred shots',`same side ≥ ${A.missed_gap_s??0.9} s apart`,'Adds a shot the video couldn’t see: before the first contact if the shuttle was already flying, or between two same-side contacts far enough apart.'],
+    ['Strokes',`overhead ≥ 0.85, underarm < 0.35 · front < 2.5 m, rear > 4.3 m`,'Contact height is the shuttle against the hitter from hips (0) to head (1). Zones are distance from the net. Overhead + rear + long flight = clear, overhead + fast = smash, overhead + to the front = drop, underarm in the front court = net shot, lift or push, underarm after a smash = block, flat and quick = drive.'],
     ['Air drag',`turn < ${A.drag_turn_deg??35}° and slowing`,'Braking in a straight line is air drag, not a contact. Contacts also need steady tracking for 4 frames before and 2 after.'],
     ['Sides',`alternate`,'Near/far picked for the whole rally at once. The same side twice within 0.35 s is merged. With a normal gap it marks a likely missed shot.'],
     ['Stuck detections',`${S.stuck_frames??0} frames removed`,'A point that sits still for 0.4 s and then jumps away was never the shuttle.'],

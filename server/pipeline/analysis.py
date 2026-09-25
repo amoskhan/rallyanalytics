@@ -13,6 +13,7 @@ from scipy.signal import find_peaks, savgol_filter
 
 from .court import Court, NET_Y, WIDTH as COURT_W
 from .players import L_WRIST, R_WRIST
+from . import strokes as strokes_mod
 
 OTHER = {"near": "far", "far": "near"}
 
@@ -315,7 +316,8 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                      "serve": n_ == 0 and start_reason == "serve",
                      "player": hrec["pl"]["id"] if hrec["pl"] else None,
                      "court": hrec["pl"]["court"] if hrec["pl"] else None,
-                     "hand_dist_px": hrec["hand_px"]})
+                     "hand_dist_px": hrec["hand_px"],
+                     "contact_h": strokes_mod.contact_height(hrec["pl"], float(ys[i]))})
     # Shots that must have happened but weren't seen:
     # - the shuttle was already flying when tracking began, so someone hit it;
     # - the same side twice with a long gap: the other side played in between
@@ -360,6 +362,15 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                "in": is_in, "settled": bool(settled), "plausible": bool(plausible)}
 
     shots = _shot_metrics(hits, landing, xs, ys, s, fps, court, court_h)
+    prev = None
+    for k, (sm, h) in enumerate(zip(shots, hits)):
+        nxt = hits[k + 1]["court"] if k + 1 < len(hits) else landing["court"]
+        stroke, why = strokes_mod.classify(sm, h, nxt, prev, h["serve"])
+        sm["stroke"], sm["stroke_why"] = stroke, why
+        sm["contact"] = strokes_mod.height_band(h.get("contact_h"))
+        sm["from_zone"] = strokes_mod.zone(abs(h["court"][1] - NET_Y)) if h.get("court") else None
+        sm["to_zone"] = strokes_mod.zone(abs(nxt[1] - NET_Y)) if nxt else None
+        prev = stroke
     speed = np.hypot(np.gradient(xs), np.gradient(ys)) * fps          # px/s along the image track
     step = 1
     return {
