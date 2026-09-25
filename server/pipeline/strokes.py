@@ -32,6 +32,20 @@ LEGACY = {"short serve": "short service", "long serve": "long service", "lift": 
           "block": "return net", "net kill": "rush"}
 
 
+def zones_for(hit, nxt_court, nxt_depth=None):
+    """Court zone the shot was played from and went to.
+
+    "Front" for the hitter is judged by the front foot (closest ankle to the net): in a
+    lunge the feet average out well behind the net. Mid/rear keep the average foot
+    position, because a player hitting from deep also has one foot nearer the net.
+    Where the shot went uses the receiver's average foot position."""
+    mean_d = abs(hit["court"][1] - NET_Y) if hit.get("court") else None
+    fd = hit.get("front_depth")
+    zf = "front" if fd is not None and fd < FRONT else zone(mean_d)
+    zt = zone(abs(nxt_court[1] - NET_Y)) if nxt_court else None
+    return zf, zt
+
+
 def zone(depth):
     if depth is None:
         return None
@@ -75,11 +89,9 @@ def height_band(h):
     return "overhead" if h >= OVERHEAD else "underarm" if h < UNDERARM else "side"
 
 
-def classify(shot, hit, nxt_court, prev_stroke, is_serve):
+def classify(shot, hit, nxt_court, prev_stroke, is_serve, nxt_depth=None):
     """Returns (stroke, reason). shot = shot_metrics entry, hit = hit record."""
-    from_d = abs(hit["court"][1] - NET_Y) if hit.get("court") else None
-    to_d = abs(nxt_court[1] - NET_Y) if nxt_court else None
-    zf, zt = zone(from_d), zone(to_d)
+    zf, zt = zones_for(hit, nxt_court, nxt_depth)
     h = hit.get("contact_h")
     band = height_band(h)
     t = shot["flight_s"]
@@ -92,7 +104,8 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
                          f"after a {prev_stroke}" if prev_stroke else None) if f]
     why = lambda s: (s, ", ".join(facts))
     answering_attack = prev_stroke in ATTACKS
-    answering_net = prev_stroke in NET_ARRIVALS
+    # Shots that arrive at the net; a net shot answering one of these is a return net.
+    answering_net = prev_stroke in ("short service", "net shot", "return net", "cross-court net shot", "drop", "passive drop")
 
     if is_serve:
         # Short services skim the net: low arc, quick flight. Long ones go high to the back.
@@ -101,12 +114,25 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve):
     if band is None and zf is None:
         return ("unknown", "no player position or pose at contact")
 
+    # --- fast shots from above the head come first: a smash taken near the net is still a smash.
+    if band == "overhead" and not answering_net:
+        if kmh >= SMASH_KMH or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
+            return why("smash")
+        if kmh >= WRIST_SMASH_KMH and t < 0.8 and zf != "rear":
+            return why("wrist smash")
+
+    # --- a slow shot that pulls the opponent right up to the net is a net shot,
+    # even when the hitter is further back.
+    pulled_in = nxt_depth is not None and nxt_depth < 1.2 and kmh < 30 and band != "overhead"
+    if pulled_in and zf != "front":
+        return why("cross-court net shot" if cross else "return net" if answering_net else "net shot")
+
     # --- front court: only net shot, cross-court net shot or lob are possible from here.
     # Short and quick is a net shot (cross-court if it crosses the centre line); anything
     # longer or higher is a lob.
     if zf == "front":
         if zt == "front" or (t < 0.9 and arc < 30 and zt != "rear"):
-            return why("cross-court net shot" if cross else "net shot")
+            return why("cross-court net shot" if cross else "return net" if answering_net else "net shot")
         return why("lob")
 
     # --- overhead: clear, drop, passive drop, smash, wrist smash (rush at the net)

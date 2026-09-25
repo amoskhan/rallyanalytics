@@ -91,6 +91,25 @@ def _wrist_height(players, f, pid, hand=None, k=2):
     return max(vals) if vals else None
 
 
+def _front_foot_depth(players, f, pid, court, k=3):
+    """Closest either ankle of player pid gets to the net (metres) within +-k frames.
+    In a lunge the front foot is at the net while the average of both feet is well
+    behind it, so this is where the player is really playing from."""
+    if pid is None:
+        return None
+    best = None
+    for g in range(f - k, f + k + 1):
+        for p in players.get(g, []):
+            if p["id"] != pid:
+                continue
+            pts = [p["kps"][i][:2] for i in (15, 16) if p["kps"][i][2] > 0.3]
+            if not pts:
+                continue
+            d = float(np.min(np.abs(court.to_court(pts)[:, 1] - NET_Y)))
+            best = d if best is None else min(best, d)
+    return None if best is None else round(best, 2)
+
+
 def _players_still(players, f, fps, window_s=0.5, max_move_m=0.5):
     """True if every player seen moved less than max_move_m in the window before frame f
     (and at least one player on each side was seen): the look of a serve."""
@@ -349,6 +368,7 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                      "player": hrec["pl"]["id"] if hrec["pl"] else None,
                      "court": hrec["pl"]["court"] if hrec["pl"] else None,
                      "hand_dist_px": hrec["hand_px"],
+                     "front_depth": _front_foot_depth(players, hrec["f"], hrec["pl"]["id"] if hrec["pl"] else None, court),
                      "contact_h": _wrist_height(players, hrec["f"], hrec["pl"]["id"] if hrec["pl"] else None,
                                                 hands.get(hrec["pl"]["id"]) if hrec["pl"] else None)})
     # Shots that must have happened but weren't seen:
@@ -398,11 +418,17 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
     prev = None
     for k, (sm, h) in enumerate(zip(shots, hits)):
         nxt = hits[k + 1]["court"] if k + 1 < len(hits) else landing["court"]
-        stroke, why = strokes_mod.classify(sm, h, nxt, prev, h["serve"])
+        # The receiver's front foot: only meaningful if the next contact is by the other side
+        # (after an unseen shot the next contact is the hitter's own side).
+        nh = hits[k + 1] if k + 1 < len(hits) else None
+        nxt_depth = nh.get("front_depth") if nh and nh["side"] != h["side"] else None
+        if nh and nh["side"] == h["side"]:
+            nxt = None
+        stroke, why = strokes_mod.classify(sm, h, nxt, prev, h["serve"], nxt_depth)
         sm["stroke"], sm["stroke_why"] = stroke, why
         sm["contact"] = strokes_mod.height_band(h.get("contact_h"))
-        sm["from_zone"] = strokes_mod.zone(abs(h["court"][1] - NET_Y)) if h.get("court") else None
-        sm["to_zone"] = strokes_mod.zone(abs(nxt[1] - NET_Y)) if nxt else None
+        fz, tz = strokes_mod.zones_for(h, nxt, nxt_depth)
+        sm["from_zone"], sm["to_zone"] = fz, tz
         prev = stroke
     speed = np.hypot(np.gradient(xs), np.gradient(ys)) * fps          # px/s along the image track
     step = 1
