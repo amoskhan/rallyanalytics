@@ -89,7 +89,7 @@ def find_rallies(sh, players, court: Court, fps, mode):
     v, x, y = sh["v"], sh["x"], sh["y"]
     near_px = court.to_image([[3.05, 0]])[0]
     far_px = court.to_image([[3.05, 13.4]])[0]
-    court_h = abs(near_px[1] - far_px[1])          # court length in image pixels
+    court_h = float(abs(near_px[1] - far_px[1]))   # court length in image pixels
     still_px = max(3.0, 0.006 * court_h)
     params = {
         "rally_gap_s": 0.8, "min_rally_s": 1.2, "min_visible_frac": 0.6, "min_travel_courts": 0.8,

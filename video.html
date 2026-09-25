@@ -91,7 +91,7 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 .tile .k{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .tile .v{font-family:var(--display);font-size:28px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
 .ca{color:var(--a)} .cb{color:var(--b)}
-.rl{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto;display:flex;flex-direction:column}
+.rl{position:relative;list-style:none;margin:0;padding:0;max-height:560px;overflow:auto;display:flex;flex-direction:column}
 .rl li{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:8px 6px;border-bottom:1px solid var(--line);border-radius:6px;cursor:pointer}
 .rl li.sel{background:var(--surface-2)}
 .rl li.ignored{opacity:.45}
@@ -129,7 +129,7 @@ h2.sec{font-family:var(--display);font-weight:600;text-transform:uppercase;lette
 .chart{width:100%;display:block;cursor:pointer}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
-.tbl-wrap{overflow-x:auto}
+.tbl-wrap{overflow-x:auto;position:relative}
 table.t{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
 table.t th{position:sticky;top:0;background:var(--surface);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:left;padding:4px 8px 6px 0;border-bottom:1px solid var(--line);white-space:nowrap}
 table.t td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
@@ -456,7 +456,7 @@ function fmtLand([x,y]){const w=x<0?`${(-x).toFixed(1)} m wide`:x>CL?`${(x-CL).t
 function select(i,seek=true){
   R.sel=i;renderList();renderMini();renderDetail();renderLabRally();
   if(seek){R.vid.currentTime=Math.max(0,R.res.rallies[i].t0-1);R.vid.play()}
-  const li=document.querySelector(`#rl li[data-r="${i}"]`);li&&li.scrollIntoView({block:'nearest'});
+  const li=document.querySelector(`#rl li[data-r="${i}"]`),rl=$('#rl');if(li&&rl){if(li.offsetTop<rl.scrollTop)rl.scrollTop=li.offsetTop;else if(li.offsetTop+li.offsetHeight>rl.scrollTop+rl.clientHeight)rl.scrollTop=li.offsetTop+li.offsetHeight-rl.clientHeight}
 }
 function step(d){const n=R.res.rallies.length;if(!n)return;let i=R.sel==null?(d>0?0:n-1):R.sel+d;i=Math.max(0,Math.min(n-1,i));select(i)}
 async function saveReview(){
@@ -659,7 +659,7 @@ function renderLabRally(){
     <canvas id="sig" class="chart" height="230"></canvas>
     <canvas id="spd" class="chart" height="90"></canvas>
     <div class="legend"><span><i style="background:var(--muted)"></i>Raw TrackNet y</span><span><i style="background:var(--cork)"></i>Smoothed y</span><span><i style="background:var(--a)"></i>Near hit</span><span><i style="background:var(--b)"></i>Far hit</span><span>○ Turn below threshold</span><span style="color:var(--bad)">× Wobble removed</span><span>▢ Last sighting</span></div>
-    <p class="small muted" style="margin:8px 0 0;max-width:90ch">How hits are found: the chart shows the shuttle's height in the picture (up = toward the far end). A near-side hit sends it up the picture and a far-side hit sends it down, so every turning point is a possible hit. A turn counts if it's at least <b>${P.hit_prominence_px} px</b> (8% of the court's ${Math.round(P.court_height_px)} px height in the picture) and ${P.hit_min_gap_s} s after the previous one. A small up-and-down pair closer than ${P.wobble_gap_s} s is treated as tracker wobble, unless a player's wrist is within ${P.hand_near_px} px both times. The lower chart is the shuttle's speed across the picture.</p>`;
+    <p class="small muted" style="margin:8px 0 0;max-width:90ch">How hits are found: the chart shows the shuttle's height in the picture (up = toward the far end). A near-side hit sends it up the picture and a far-side hit sends it down, so every turning point is a possible hit. A turn counts if it's at least <b>${Math.round(P.hit_prominence_px)} px</b> (8% of the court's ${Math.round(P.court_height_px)} px height in the picture) and ${P.hit_min_gap_s} s after the previous one. A small up-and-down pair closer than ${P.wobble_gap_s} s is treated as tracker wobble, unless a player's wrist is within ${Math.round(P.hand_near_px)} px both times. The lower chart is the shuttle's speed across the picture.</p>`;
   document.querySelectorAll('[data-sigwin]').forEach(b=>b.onclick=()=>{LAB.win=b.dataset.sigwin;renderLabRally()});
   ['sig','spd'].forEach(id=>$('#'+id).onclick=e=>{const g=LAB.sigGeom;if(!g)return;const rr=e.target.getBoundingClientRect();const f=g.f0+((e.clientX-rr.left)-g.left)/g.iw*(g.f1-g.f0);R.vid.currentTime=Math.max(0,f/R.res.meta.fps)});
   renderShotTable(r); renderCourtMap(r);
@@ -700,6 +700,15 @@ function renderCourtMap(r){
     <p class="small muted">Lines are each player's path on the floor (dashed = player 2). Gold dots mark where each shot was played. Big dots show where everyone is right now in the video. ${r.landing.court?'The cross marks where the rally ended.':'The shuttle was lost from view before it landed, so there is no landing mark.'}</p></div></div>`;
 }
 
+// Keep a row visible inside its own scroll box without moving the page.
+function scrollWithin(el){
+  const box=el.closest('.tbl-wrap'); if(!box) return;
+  const head=box.querySelector('thead')?.offsetHeight||0;
+  const top=el.offsetTop, bottom=top+el.offsetHeight;
+  if(top-head<box.scrollTop) box.scrollTop=top-head;
+  else if(bottom>box.scrollTop+box.clientHeight) box.scrollTop=bottom-box.clientHeight;
+}
+
 function labTick(f,force){
   if(!R.res.pipeline||!LAB.base) return;
   const res=R.res;
@@ -709,7 +718,7 @@ function labTick(f,force){
   drawSignal(r,f);
   // Highlight the current shot
   let k=-1;for(let i=0;i<r.hits.length;i++)if(r.hits[i].f<=f)k=i;
-  if(k!==LAB.lastShot||force){LAB.lastShot=k;document.querySelectorAll('#shotTbl tr.cur').forEach(t=>t.classList.remove('cur'));const tr=document.querySelector(`#shotTbl tr[data-k="${k}"]`);if(tr){tr.classList.add('cur');if(!R.vid.paused)tr.scrollIntoView({block:'nearest'})}}
+  if(k!==LAB.lastShot||force){LAB.lastShot=k;document.querySelectorAll('#shotTbl tr.cur').forEach(t=>t.classList.remove('cur'));const tr=document.querySelector(`#shotTbl tr[data-k="${k}"]`);if(tr){tr.classList.add('cur');if(!R.vid.paused)scrollWithin(tr)}}
   // Live player dots on the court map
   const g=$('#liveDots'); if(g&&R.players){const ps=R.players[f]||R.players[f-1]||[];const cols=[tok('a'),tok('a'),tok('b'),tok('b')];
     g.innerHTML=ps.map(p=>{const foot=[(p[2]+p[4])/2,p[5]];const[cx,cy]=apply(res.court.H,foot);return `<circle cx="${cx.toFixed(2)}" cy="${(CLEN-cy).toFixed(2)}" r=".22" fill="${cols[p[0]]}" stroke="${tok('court-line')}" stroke-width=".05"/>`}).join('')}
@@ -767,9 +776,9 @@ function renderSettings(){
     ['Rally gap',`${A.rally_gap_s} s`,'Losing the shuttle for longer than this ends a rally.'],
     ['Minimum rally',`${A.min_rally_s} s, ${Math.round(A.min_visible_frac*100)}% seen, ${A.min_travel_courts} court lengths travelled`,'Stretches failing any of these are rejected (listed below).'],
     ['Smoothing',`${A.smooth_window_frames} frames`,'Savitzky–Golay filter on the height signal before looking for turns.'],
-    ['Hit threshold',`${A.hit_prominence_px} px turn, ${A.hit_min_gap_s} s apart`,'8% of the court height in the picture.'],
-    ['Wobble filter',`< ${A.wobble_prominence_px} px within ${A.wobble_gap_s} s`,`Kept if a wrist is within ${A.hand_near_px} px of the shuttle for both turns.`],
-    ['Landing',`still for 0.1 s, moving < ${A.still_px} px`,'The final motionless stretch is the landing. A last sighting that projects off the court is marked unknown.'],
+    ['Hit threshold',`${Math.round(A.hit_prominence_px)} px turn, ${A.hit_min_gap_s} s apart`,'8% of the court height in the picture.'],
+    ['Wobble filter',`< ${Math.round(A.wobble_prominence_px)} px within ${A.wobble_gap_s} s`,`Kept if a wrist is within ${Math.round(A.hand_near_px)} px of the shuttle for both turns.`],
+    ['Landing',`still for 0.1 s, moving < ${Math.round(A.still_px)} px`,'The final motionless stretch is the landing. A last sighting that projects off the court is marked unknown.'],
   ];
   return `<div class="tbl-wrap" style="margin-top:10px"><table class="t"><thead><tr><th>Setting</th><th>Value</th><th>What it does</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${r[0]}</b></td><td class="num">${esc(r[1])}</td><td class="muted">${r[2]}</td></tr>`).join('')}</tbody></table></div>
   <h3 class="sec" style="margin-top:14px">Shuttle-visible stretches</h3>
