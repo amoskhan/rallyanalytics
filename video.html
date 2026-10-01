@@ -191,7 +191,16 @@ details.panel summary{cursor:pointer}
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtT=s=>{s=Math.max(0,s);const m=Math.floor(s/60);return m+':'+String(Math.floor(s%60)).padStart(2,'0')};
-const api=async(p,o={})=>{const r=await fetch('/api'+p,o);if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}return r.headers.get('content-type')?.includes('json')?r.json():r};
+// Start a re-analysis. The server refuses (409) while the video has Checked rallies, because
+// re-analysing can change its rallies; ask, then go ahead and let it clear them.
+async function reanalyse(vid,path,body){
+  const call=q=>api('/videos/'+vid+path+q,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{method:'POST'});
+  try{return await call('')}catch(e){
+    if(e.status!==409)throw e;
+    if(!confirm(e.message+' Re-analyse anyway?')){const c=new Error('Not re-analysed.');c.cancelled=true;throw c}
+    return call('?clear_checked=true')}
+}
+const api=async(p,o={})=>{const r=await fetch('/api'+p,o);if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}const err=new Error(m);err.status=r.status;throw err}return r.headers.get('content-type')?.includes('json')?r.json():r};
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2200)}
 
 // Court model (metres). x across 0..6.10, y along 0..13.40 from the near baseline.
@@ -308,7 +317,7 @@ function renderError(v){
     <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:10px;border-radius:8px;max-height:260px;overflow:auto">${esc(v.status.error)}</pre>
     <div class="row"><button class="btn primary" id="retry">Try again</button>${v.meta?'<button class="btn" id="recourt">Re-mark the court</button>':''}</div>
   </div>`;
-  $('#retry').onclick=async()=>{await api('/videos/'+v.info.id+'/retry',{method:'POST'});openVideo(v.info.id)};
+  $('#retry').onclick=async()=>{try{await reanalyse(v.info.id,'/retry');openVideo(v.info.id)}catch(e){toast(e.message)}};
   const rc=$('#recourt'); if(rc) rc.onclick=()=>renderCourtSetup(v);
 }
 
@@ -379,7 +388,7 @@ function renderCourtSetup(v){
   $('#go').onclick=async()=>{
     $('#go').disabled=true;
     try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({names:setupNames,hands:setupHands})});
-      await api('/videos/'+S.vid+'/analyse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({corners:pts,mode:$('#mode').value})});openVideo(S.vid)}
+      await reanalyse(S.vid,'/analyse',{corners:pts,mode:$('#mode').value});openVideo(S.vid)}
     catch(e){toast(e.message);$('#go').disabled=false}
   };
   draw();
@@ -390,7 +399,7 @@ let R=null; // {res, players, review, sel, show}
 async function renderReview(v){
   const [res,review]=await Promise.all([api('/videos/'+S.vid+'/result.json'),api('/videos/'+S.vid+'/review')]);
   const ov={};(review.rallies||[]).forEach(o=>ov[o.i]=o);
-  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),hands:review.hands||{},strokesOv:Object.fromEntries(Object.entries(review.strokes||{}).map(([k,v])=>[k,LEGACY[v]||v])),live:{k:-2,r:-1}};
+  R={res,players:null,ov,sel:null,show:{court:true,shuttle:true,raw:false,players:true,labels:true,hits:true},v,names:normNames(review.names),hands:review.hands||{},strokesOv:Object.fromEntries(Object.entries(review.strokes||{}).map(([k,v])=>[k,LEGACY[v]||v])),checked:review.checked||{},set:review.set||null,labelling:null,live:{k:-2,r:-1}};
   const meta=res.meta, dbl=res.mode==='doubles';
   const handSel=(key)=>`<select class="handsel" data-hand="${key}" title="Racket hand" aria-label="Racket hand">${[['','Hand ?'],['R','Right'],['L','Left']].map(([v,l])=>`<option value="${v}"${(R.hands[key]||'')===v?' selected':''}>${l}</option>`).join('')}</select>`;
   const nameField=(key,label,cls)=>`<div class="field"><span class="${cls}">${label}</span><div class="namerow"><input id="nm_${key}" data-name="${key}" value="${esc(R.names[key])}" maxlength="24">${handSel(key)}</div></div>`;
@@ -438,8 +447,8 @@ async function renderReview(v){
   document.querySelectorAll('[data-hand]').forEach(sel=>sel.onchange=async()=>{
     if(sel.value)R.hands[sel.dataset.hand]=sel.value;else delete R.hands[sel.dataset.hand];
     try{await api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({hands:R.hands})});
-      await api('/videos/'+S.vid+'/retry',{method:'POST'});toast('Racket hand saved. Re-running the analysis…');openVideo(S.vid)}
-    catch(e){toast('Could not save: '+e.message)}});
+      await reanalyse(S.vid,'/retry');toast('Racket hand saved. Re-running the analysis…');openVideo(S.vid)}
+    catch(e){toast(e.cancelled?'Racket hand saved. '+e.message:'Could not save: '+e.message)}});
   document.querySelectorAll('[data-name]').forEach(inp=>inp.oninput=()=>{R.names[inp.dataset.name]=inp.value.trim()||defaultName(inp.dataset.name);saveNames();renderTiles();renderList();renderDetail();renderRallyCard();renderPlayerStats(currentRally());renderShotLog(currentRally());R.live.k=-2;renderLabRally()});
   $('#toScore').onclick=()=>{$('#sendConfirm').hidden=false};
   $('#sendNo').onclick=()=>{$('#sendConfirm').hidden=true};
@@ -450,7 +459,7 @@ async function renderReview(v){
   };
   const tick=()=>{drawOverlay();if(R&&R.vid===vid){vid.requestVideoFrameCallback?vid.requestVideoFrameCallback(tick):requestAnimationFrame(tick)}};
   tick(); vid.addEventListener('seeked',drawOverlay);
-  renderTiles();renderList();renderDetail();renderRallyCard();renderLab();
+  renderTiles();renderList();renderDetail();renderRallyCard();renderLab();refreshLabelling();
 }
 const NAME_KEYS=['near1','near2','far1','far2'];
 const defaultName=k=>({near1:'Near 1',near2:'Near 2',far1:'Far 1',far2:'Far 2'})[k];
@@ -479,7 +488,7 @@ function renderList(){
     return `<li data-r="${r.i}" class="${R.sel===r.i?'sel':''} ${w==='skip'?'ignored':''}">
       <span class="n">${r.i+1}</span>
       <div><div class="l1">${w==='skip'?'Not a rally':w==null?'<b>Winner unknown</b>, pick one':`<span class="${w==='near'?'ca':'cb'}">${nm(w)}</span> wins`} <span class="muted">· ${r.shots_estimated??r.shots} shots${r.missed&&r.missed.length?` (${r.shots} seen + ${r.missed.length} inferred)`:''} · ${r.duration.toFixed(1)} s</span></div>
-      <div class="l2">${fmtT(r.t0)} · ${corrected?'corrected by you':`last shot ${HOW[r.how]}${r.confidence==='low'?' · unsure':''}`}</div>
+      <div class="l2">${R.checked[r.i]?'<span class="pill">✓ checked</span> ':''}${fmtT(r.t0)} · ${corrected?'corrected by you':`last shot ${HOW[r.how]}${r.confidence==='low'?' · unsure':''}`}</div>
       <div class="win">${['near','far','skip'].map(k=>`<button class="${k}" data-win="${k}" data-ri="${r.i}" aria-pressed="${w===k}">${k==='skip'?'Ignore':nm(k)}</button>`).join('')}</div></div></li>`}).join('')||'<p class="muted small">No rallies found. Check the court corners and camera angle.</p>';
 }
 function currentRally(){return R.sel!=null?R.res.rallies[R.sel]:(rallyAt(Math.round(R.vid.currentTime*R.res.meta.fps))||R.res.rallies[0])}
@@ -518,7 +527,10 @@ const cap1=t=>t.charAt(0).toUpperCase()+t.slice(1);
 // Display name: the ShuttleSet type exactly as the dataset writes it.
 const strokeLabel=(r,k)=>cap1(strokeOf(r,k));
 let strokeSave=null;
-function saveStrokes(){clearTimeout(strokeSave);strokeSave=setTimeout(()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({strokes:R.strokesOv})}).catch(e=>toast('Could not save: '+e.message)),300)}
+const putStrokes=()=>api('/videos/'+S.vid+'/review',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({strokes:R.strokesOv})});
+function saveStrokes(){clearTimeout(strokeSave);strokeSave=setTimeout(()=>{strokeSave=null;putStrokes().then(refreshLabelling,e=>toast('Could not save: '+e.message))},300)}
+// Send a stroke change still waiting to be saved, so Rally checked confirms what's on screen.
+async function flushStrokes(){if(strokeSave){clearTimeout(strokeSave);strokeSave=null;await putStrokes()}}
 // Live shot log beside the video: played shots in full, the current one highlighted,
 // upcoming ones faded. Scrolls inside its own box so the page doesn't move.
 function renderShotLog(r){
@@ -548,7 +560,17 @@ function renderStrokeStats(r){
   const order=STROKES.concat(['unknown']).filter(st=>count[st]);
   const mx=Math.max(1,...order.flatMap(st=>cols.map(c=>count[st][c[0]]||0)));
   el.innerHTML=`<table class="t"><thead><tr><th>Stroke</th>${cols.map(c=>`<th style="color:${c[2]}">${c[1]}</th>`).join('')}</tr></thead><tbody>${order.map(st=>`<tr><td><span class="sdot" style="background:${STROKE_COL[st]}"></span>${cap1(st)}</td>${cols.map(c=>{const v=count[st][c[0]]||0;return `<td><div class="cell"><span class="bar" style="width:${Math.round(v/mx*48)}px;background:${c[2]}"></span>${v||''}</div></td>`}).join('')}</tr>`).join('')}</tbody></table>
-  <p class="small muted" style="margin:6px 0 0">Guessed from contact height, where each shot was hit from and went to, and its flight time. Correct any stroke in the shot table below the video. Corrections are saved and used to improve the rules.</p>`;
+  <p class="small muted" style="margin:6px 0 0">Guessed from contact height, where each shot was hit from and went to, and its flight time. Correct any stroke in the shot table below the video; corrections fix this video's report. Press <b>Rally checked</b> once every stroke in a rally is right (or Unknown): checked rallies are what will teach the app to recognise strokes.</p>
+  <div class="row" style="margin-top:6px"><button class="btn" id="recheckStrokes" title="Work out this video's strokes again with the app's latest stroke rules. Your corrections and checked rallies stay as they are.">Re-check strokes</button>
+    <span class="small muted">Uses the latest stroke rules${R.res.pipeline?.analysis?.stroke_cutoffs_version?` (this video: version ${R.res.pipeline.analysis.stroke_cutoffs_version})`:''}. Your corrections are kept.</span></div>`;
+  $('#recheckStrokes').onclick=recheckStrokes;
+}
+async function recheckStrokes(){
+  $('#recheckStrokes').disabled=true;
+  try{const r=await api('/videos/'+S.vid+'/recheck-strokes',{method:'POST'});
+    toast(r.changed?`${r.changed} stroke${r.changed===1?'':'s'} updated (stroke rules version ${r.cutoffs_version})`:`Already up to date (stroke rules version ${r.cutoffs_version})`);
+    if(r.changed)openVideo(S.vid);else $('#recheckStrokes').disabled=false}
+  catch(e){toast(e.message);$('#recheckStrokes').disabled=false}
 }
 
 // Court map beside the video. Each shot appears as it's hit: an arrow from where it was
@@ -782,7 +804,7 @@ function renderLab(){
   new ResizeObserver(()=>{LAB.base=null;drawTimelineBase();labTick(Math.round(R.vid.currentTime*res.meta.fps),true)}).observe($('#tl'));
 }
 async function rerun(){
-  try{await api('/videos/'+S.vid+'/retry',{method:'POST'});toast('Re-running analysis…');openVideo(S.vid)}catch(e){toast(e.message)}
+  try{await reanalyse(S.vid,'/retry');toast('Re-running analysis…');openVideo(S.vid)}catch(e){toast(e.message)}
 }
 
 const TL_LEFT=118, TL_H=170;
@@ -838,10 +860,72 @@ function renderLabRally(){
   LAB.lastShot=-1; labTick(Math.round(R.vid.currentTime*R.res.meta.fps),true);
 }
 
+// Checked rallies across all videos, by set, and which set this video's checked rallies are in.
+function labellingLine(){
+  const L=R.labelling; if(!L) return '';
+  const part=(k,name)=>`${name}: ${L[k].rallies} checked rall${L[k].rallies===1?'y':'ies'}, ${L[k].shots} shots from ${L[k].videos} video${L[k].videos===1?'':'s'}`;
+  return `${R.set?`This video's checked rallies are in the <b>${R.set} set</b>. `:''}All videos · ${part('teaching','Teaching')} · ${part('test','Test')}`;
+}
+async function refreshLabelling(){
+  const mine=R;   // the video open when this started; ignore the answer if another one is open by then
+  try{const [L,P,H]=await Promise.all([api('/labelling'),R.improvement===undefined?api('/improvement'):Promise.resolve(R.improvement),api('/improvement/history')]);if(R!==mine)return;
+    R.labelling=L;R.improvement=P;R.history=H;const el=$('#labSum');if(el)el.innerHTML=labellingLine();renderImprovement()}catch(e){}
+}
+
+// Run improvement: tune the stroke rules on the teaching set, score them on the test set, then
+// the Labeller keeps or discards the result. Nothing changes until Keep.
+const CUTOFF_NAMES={front_m:'Front court ends (m from the net)',rear_m:'Rear court starts (m from the net)',overhead:'Overhead from wrist height',
+  underarm:'Underarm below wrist height',smash_kmh:'Smash from (km/h)',wrist_smash_kmh:'Wrist smash from (km/h)'};
+const asPct=v=>Math.round(v*100)+'%';
+function improvementHtml(){
+  const P=R.improvement;
+  const run='<button class="btn" id="runImprove" title="Tune the stroke rules on the teaching set and score them on the test set. Nothing changes until you press Keep.">Run improvement</button>';
+  if(!P) return run;
+  if(P.status==='not_enough') return `${run}<p class="small" style="margin:6px 0 0">Not enough checked rallies yet: the test set has <b>${P.test_shots}</b> checked shots and needs at least ${P.needed}${P.teaching_shots?'':', and the teaching set has none'}. Keep checking rallies.</p>`;
+  const a=P.accuracy, up=a.after>a.before, same=a.after===a.before;
+  const strokes=Object.entries(P.strokes).sort((x,y)=>y[1].shots-x[1].shots);
+  const cut=Object.entries(P.cutoffs);
+  return `<div style="border:1px solid var(--line,#ccc);border-radius:10px;padding:10px 12px">
+    <div class="row" style="justify-content:space-between;align-items:center"><b>Improvement result</b><span class="small muted">${P.teaching_shots} teaching shots · ${P.test_shots} test shots</span></div>
+    <p style="margin:6px 0">Stroke accuracy on the test set: <b>${asPct(a.before)} → ${asPct(a.after)}</b> ${same?'(no change)':up?'(better)':'(worse)'}</p>
+    ${P.warning?`<p style="margin:6px 0;color:#b3261e"><b>⚠ ${esc(P.warning)}</b> Think twice before keeping this.</p>`:''}
+    ${cut.length?`<p class="small" style="margin:6px 0 2px"><b>Rules that would change</b></p><ul class="small" style="margin:0 0 6px;padding-left:18px">${cut.map(([k,v])=>`<li>${esc(CUTOFF_NAMES[k]||k)}: ${v.before} → ${v.after}</li>`).join('')}</ul>`:'<p class="small muted" style="margin:6px 0">No rule changes: the teaching set gives no reason to move any of them.</p>'}
+    ${P.mixups.length?`<p class="small" style="margin:6px 0 2px"><b>Most common mix-ups</b> (test set, before → after)</p><ul class="small" style="margin:0 0 6px;padding-left:18px">${P.mixups.map(m=>`<li>${esc(cap1(m.label))} called ${esc(m.called)}: ${m.before} → ${m.after}</li>`).join('')}</ul>`:''}
+    <div class="tbl-wrap" style="max-height:220px;overflow:auto"><table class="t"><thead><tr><th>Stroke</th><th title="Checked test shots of this stroke">Shots</th><th>Before</th><th>After</th></tr></thead><tbody>
+      ${strokes.map(([st,v])=>`<tr><td><span class="sdot" style="background:${STROKE_COL[st]||'#999'}"></span>${esc(cap1(st))}</td><td class="num">${v.shots}${v.shots<8?' <span class="muted" title="Too few shots to trust a change">·</span>':''}</td><td class="num">${asPct(v.before)}</td><td class="num">${asPct(v.after)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="row" style="margin-top:8px"><button class="btn primary" id="keepImprove">Keep</button><button class="btn" id="discardImprove">Discard</button>${run}</div></div>`;
+}
+const OUTCOME={pending:'waiting for Keep or Discard',kept:'kept',discarded:'discarded',replaced:'replaced by a newer run',undone:'undone'};
+function historyHtml(){
+  const H=R.history?.entries||[]; if(!H.length) return '';
+  const row=e=>e.outcome==='undone'
+    ?`<li>${esc(e.date)} · <b>undone</b>: back from stroke rules version ${e.from_version} to ${e.version}</li>`
+    :`<li>${esc(e.date)} · <b>${OUTCOME[e.outcome]||esc(e.outcome)}</b>${e.outcome==='kept'?` as version ${e.version}`:''} · test accuracy ${asPct(e.accuracy.before)} → ${asPct(e.accuracy.after)} · teaching ${e.teaching.rallies} rallies / ${e.teaching.shots} shots, test ${e.test.rallies} / ${e.test.shots}</li>`;
+  return `<details style="margin-top:8px"><summary class="small">Improvement history (${H.length})</summary>
+    <ul class="small" style="margin:6px 0;padding-left:18px">${H.map(row).join('')}</ul>
+    ${R.history.can_undo?'<button class="btn" id="undoImprove" title="Go back to the stroke rules in use before the last Keep">Undo last improvement</button>':''}</details>`;
+}
+function renderImprovement(){
+  const el=$('#improvePanel'); if(!el) return;
+  el.innerHTML=improvementHtml()+historyHtml();
+  const b=(id,f)=>{const x=$('#'+id);if(x)x.onclick=f};
+  const reload=async()=>{try{R.history=await api('/improvement/history')}catch(e){}renderImprovement()};
+  b('runImprove',async()=>{$('#runImprove').disabled=true;$('#runImprove').textContent='Running…';
+    try{R.improvement=await api('/improvement',{method:'POST'})}catch(e){toast(e.message)}reload()});
+  b('undoImprove',async()=>{if(!confirm('Go back to the stroke rules in use before the last Keep?'))return;
+    try{const r=await api('/improvement/undo',{method:'POST'});toast(`Back to stroke rules version ${r.version}. Press Re-check strokes to update videos.`);reload()}catch(e){toast(e.message)}});
+  b('keepImprove',async()=>{try{const r=await api('/improvement/keep',{method:'POST'});R.improvement=null;reload();
+    toast(`Kept: stroke rules version ${r.version}. New analyses use it; press Re-check strokes to update older videos.`)}catch(e){toast(e.message)}});
+  b('discardImprove',async()=>{try{await api('/improvement/discard',{method:'POST'});R.improvement=null;reload();toast('Discarded. The stroke rules are unchanged.')}catch(e){toast(e.message)}});
+}
 function renderShotTable(r){
   const sm=r.shot_metrics, mx=Math.max(1,...sm.map(s=>s.avg_speed_kmh||0),...sm.map(s=>s.peak_speed_kmh||0));
   const bar=(v,cls)=>v==null?'<span class="muted">–</span>':`<div class="cell"><span class="bar ${cls}" style="width:${Math.round(v/mx*50)}px"></span>${v}</div>`;
-  $('#shotPanel').innerHTML=`<h3 class="sec">Shot by shot · Rally ${r.i+1}</h3>
+  const done=!!R.checked[r.i];
+  $('#shotPanel').innerHTML=`<div class="row" style="justify-content:space-between;align-items:center"><h3 class="sec" style="margin:0">Shot by shot · Rally ${r.i+1}</h3>
+    <button class="btn${done?' primary':''}" id="checkRally" aria-pressed="${done}" title="Confirm every stroke in this rally is right (or Unknown). Only checked rallies teach the app.">${done?'✓ Rally checked':'Rally checked'}</button></div>
+    <p class="small muted" id="labSum" style="margin:4px 0 8px">${labellingLine()}</p>
+    <div id="improvePanel" style="margin:0 0 10px">${improvementHtml()}</div>
     <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Pick the right stroke if the guess is wrong">Stroke</th><th title="Contact height: overhead, side or underarm">Contact</th><th title="Court zone hit from → zone it went to">From → to</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
     <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
       <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
@@ -855,6 +939,11 @@ function renderShotTable(r){
     if(sel.value===sel.dataset.auto)delete R.strokesOv[sel.dataset.stroke];else R.strokesOv[sel.dataset.stroke]=sel.value;
     saveStrokes();sel.classList.toggle('fixed',sel.dataset.stroke in R.strokesOv);sel.style.borderLeftColor=STROKE_COL[sel.value];
     const rr=labRally();renderStrokeStats(rr);renderShotLog(currentRally());R.live.k=-2;liveTick(Math.round(R.vid.currentTime*R.res.meta.fps));toast('Stroke saved')};
+  $('#checkRally').onclick=async()=>{
+    try{if(done){await api('/videos/'+S.vid+'/rallies/'+r.i+'/checked',{method:'DELETE'});delete R.checked[r.i];toast('Rally unchecked')}
+      else{await flushStrokes();const c=await api('/videos/'+S.vid+'/rallies/'+r.i+'/checked',{method:'PUT'});R.set=c.set;delete c.set;R.checked[r.i]=c;toast('Rally checked')}
+      renderList();renderShotTable(r);refreshLabelling()}catch(e){toast('Could not save: '+e.message)}};
+  renderImprovement();
   $('#shotTbl').onclick=e=>{if(e.target.closest('select'))return;const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
 }
 
