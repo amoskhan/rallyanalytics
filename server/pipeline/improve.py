@@ -7,6 +7,7 @@ See docs/training-process.md and ADR 0001.
 import os
 import threading
 import time
+import uuid
 from collections import Counter
 
 from . import cutoffs as cutoffs_mod, labels as labels_mod, paths, storage
@@ -26,7 +27,10 @@ RANGES = {
     "wrist_smash_kmh": [25 + 2.5 * i for i in range(13)],         # 25 - 55 km/h
 }
 PENDING = os.path.join(paths.DATA_ROOT, "stroke_improvement_pending.json")
-_lock = threading.Lock()   # the pending result is saved, kept or discarded one at a time
+# Every run that produced a report, with what became of it (pending, kept, discarded, replaced),
+# and every undo. Oldest first on disk, newest first when read.
+HISTORY = os.path.join(paths.DATA_ROOT, "stroke_improvement_history.json")
+_lock = threading.Lock()   # the pending result and the history change one at a time
 
 
 def _predict(rallies, cutoffs):
@@ -107,7 +111,13 @@ def run():
     report = {"status": "ready", "base_version": version, "teaching_shots": teaching_shots, "created": time.time(),
               **_report(_predict(test, current), _predict(test, tuned), current, tuned)}
     with _lock:
-        storage.save_json(PENDING, {**report, "tuned": tuned}, indent=1)
+        earlier = _read_pending()
+        if earlier:
+            _set_outcome(earlier.get("run_id"), "replaced")
+        run_id = _log({"outcome": "pending", "base_version": version, "accuracy": report["accuracy"],
+                       "teaching": {"rallies": len(teaching), "shots": teaching_shots},
+                       "test": {"rallies": len(test), "shots": test_shots}})
+        storage.save_json(PENDING, {**report, "tuned": tuned, "run_id": run_id}, indent=1)
     return report
 
 
@@ -116,6 +126,7 @@ def pending():
     p = _read_pending()
     if p:
         p.pop("tuned", None)
+        p.pop("run_id", None)
     return p
 
 
@@ -130,12 +141,56 @@ def keep():
             raise ValueError("The stroke rules changed since this improvement was run. Run it again.")
         version = cutoffs_mod.add_version(p["tuned"])
         storage.remove(PENDING)
+        _set_outcome(p.get("run_id"), "kept", version=version)
     return version
 
 
 def discard():
     with _lock:
+        p = _read_pending()
         storage.remove(PENDING)
+        if p:
+            _set_outcome(p.get("run_id"), "discarded")
+
+
+def undo():
+    """Go back to the stroke rules in use before the last Keep. Returns the version now in use.
+    Raises LookupError when the original rules are in use."""
+    with _lock:
+        undone, now = cutoffs_mod.undo()
+        _log({"outcome": "undone", "from_version": undone, "version": now})
+    return now
+
+
+def history():
+    """Every logged run and undo, newest first, and whether Undo has anything to go back to."""
+    return {"entries": list(reversed(_read_history())), "can_undo": cutoffs_mod.can_undo()}
+
+
+def _read_history():
+    try:
+        return storage.load_json(HISTORY, [])
+    except ValueError:   # a damaged log: start a fresh one rather than fail
+        return []
+
+
+def _log(entry):
+    """Add an entry to the history. Returns its id. The caller holds _lock."""
+    log = _read_history()
+    entry = {"id": uuid.uuid4().hex, "date": time.strftime("%Y-%m-%d %H:%M"), **entry}
+    log.append(entry)
+    storage.save_json(HISTORY, log, indent=1)
+    return entry["id"]
+
+
+def _set_outcome(run_id, outcome, **extra):
+    """Record what became of a logged run. The caller holds _lock."""
+    log = _read_history()
+    for entry in log:
+        if entry["id"] == run_id:
+            entry.update(outcome=outcome, **extra)
+            storage.save_json(HISTORY, log, indent=1)
+            return
 
 
 def _read_pending():

@@ -868,8 +868,8 @@ function labellingLine(){
 }
 async function refreshLabelling(){
   const mine=R;   // the video open when this started; ignore the answer if another one is open by then
-  try{const [L,P]=await Promise.all([api('/labelling'),R.improvement===undefined?api('/improvement'):Promise.resolve(R.improvement)]);if(R!==mine)return;
-    R.labelling=L;R.improvement=P;const el=$('#labSum');if(el)el.innerHTML=labellingLine();renderImprovement()}catch(e){}
+  try{const [L,P,H]=await Promise.all([api('/labelling'),R.improvement===undefined?api('/improvement'):Promise.resolve(R.improvement),api('/improvement/history')]);if(R!==mine)return;
+    R.labelling=L;R.improvement=P;R.history=H;const el=$('#labSum');if(el)el.innerHTML=labellingLine();renderImprovement()}catch(e){}
 }
 
 // Run improvement: tune the stroke rules on the teaching set, score them on the test set, then
@@ -895,15 +895,28 @@ function improvementHtml(){
       ${strokes.map(([st,v])=>`<tr><td><span class="sdot" style="background:${STROKE_COL[st]||'#999'}"></span>${esc(cap1(st))}</td><td class="num">${v.shots}${v.shots<8?' <span class="muted" title="Too few shots to trust a change">·</span>':''}</td><td class="num">${asPct(v.before)}</td><td class="num">${asPct(v.after)}</td></tr>`).join('')}</tbody></table></div>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="keepImprove">Keep</button><button class="btn" id="discardImprove">Discard</button>${run}</div></div>`;
 }
+const OUTCOME={pending:'waiting for Keep or Discard',kept:'kept',discarded:'discarded',replaced:'replaced by a newer run',undone:'undone'};
+function historyHtml(){
+  const H=R.history?.entries||[]; if(!H.length) return '';
+  const row=e=>e.outcome==='undone'
+    ?`<li>${esc(e.date)} · <b>undone</b>: back from stroke rules version ${e.from_version} to ${e.version}</li>`
+    :`<li>${esc(e.date)} · <b>${OUTCOME[e.outcome]||esc(e.outcome)}</b>${e.outcome==='kept'?` as version ${e.version}`:''} · test accuracy ${asPct(e.accuracy.before)} → ${asPct(e.accuracy.after)} · teaching ${e.teaching.rallies} rallies / ${e.teaching.shots} shots, test ${e.test.rallies} / ${e.test.shots}</li>`;
+  return `<details style="margin-top:8px"><summary class="small">Improvement history (${H.length})</summary>
+    <ul class="small" style="margin:6px 0;padding-left:18px">${H.map(row).join('')}</ul>
+    ${R.history.can_undo?'<button class="btn" id="undoImprove" title="Go back to the stroke rules in use before the last Keep">Undo last improvement</button>':''}</details>`;
+}
 function renderImprovement(){
   const el=$('#improvePanel'); if(!el) return;
-  el.innerHTML=improvementHtml();
+  el.innerHTML=improvementHtml()+historyHtml();
   const b=(id,f)=>{const x=$('#'+id);if(x)x.onclick=f};
+  const reload=async()=>{try{R.history=await api('/improvement/history')}catch(e){}renderImprovement()};
   b('runImprove',async()=>{$('#runImprove').disabled=true;$('#runImprove').textContent='Running…';
-    try{R.improvement=await api('/improvement',{method:'POST'})}catch(e){toast(e.message)}renderImprovement()});
-  b('keepImprove',async()=>{try{const r=await api('/improvement/keep',{method:'POST'});R.improvement=null;renderImprovement();
+    try{R.improvement=await api('/improvement',{method:'POST'})}catch(e){toast(e.message)}reload()});
+  b('undoImprove',async()=>{if(!confirm('Go back to the stroke rules in use before the last Keep?'))return;
+    try{const r=await api('/improvement/undo',{method:'POST'});toast(`Back to stroke rules version ${r.version}. Press Re-check strokes to update videos.`);reload()}catch(e){toast(e.message)}});
+  b('keepImprove',async()=>{try{const r=await api('/improvement/keep',{method:'POST'});R.improvement=null;reload();
     toast(`Kept: stroke rules version ${r.version}. New analyses use it; press Re-check strokes to update older videos.`)}catch(e){toast(e.message)}});
-  b('discardImprove',async()=>{try{await api('/improvement/discard',{method:'POST'});R.improvement=null;renderImprovement();toast('Discarded. The stroke rules are unchanged.')}catch(e){toast(e.message)}});
+  b('discardImprove',async()=>{try{await api('/improvement/discard',{method:'POST'});R.improvement=null;reload();toast('Discarded. The stroke rules are unchanged.')}catch(e){toast(e.message)}});
 }
 function renderShotTable(r){
   const sm=r.shot_metrics, mx=Math.max(1,...sm.map(s=>s.avg_speed_kmh||0),...sm.map(s=>s.peak_speed_kmh||0));

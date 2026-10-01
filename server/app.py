@@ -66,6 +66,21 @@ def discard_improvement():
     return {"ok": True}
 
 
+@app.post("/api/improvement/undo")
+def undo_improvement():
+    """Go back to the stroke rules in use before the last Keep."""
+    try:
+        return {"version": improve.undo()}
+    except LookupError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/api/improvement/history")
+def improvement_history():
+    """Every improvement run (pending, kept, discarded or replaced) and every undo, newest first."""
+    return improve.history()
+
+
 @app.get("/api/videos")
 def videos():
     return job.list_videos()

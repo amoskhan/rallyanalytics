@@ -1,7 +1,9 @@
 """The stroke rules' cut-offs, saved as numbered versions so an improvement can be kept or undone.
 
-The file holds {"current": n, "versions": [{"version": n, "cutoffs": {...}, "created": t}, ...]}.
-Version 1 is the hand-set defaults in strokes.py, written the first time the file is read.
+The file holds {"current": n, "versions": [{"version": n, "cutoffs": {...}, "created": t,
+"previous": m}, ...]}, where "previous" is the version in use when this one was kept (what Undo
+goes back to). Version 1 is the hand-set defaults in strokes.py, written the first time the
+file is read.
 """
 import os
 import threading
@@ -39,7 +41,32 @@ def add_version(cutoffs):
     with _lock:
         store = _load()
         version = max(v["version"] for v in store["versions"]) + 1
-        store["versions"].append({"version": version, "cutoffs": dict(cutoffs), "created": time.time()})
+        store["versions"].append({"version": version, "cutoffs": dict(cutoffs), "created": time.time(),
+                                  "previous": store["current"]})
         store["current"] = version
         _save(store)
     return version
+
+
+def _previous(v):
+    # Versions saved before Undo existed don't record what they replaced: they followed in order.
+    return v.get("previous", v["version"] - 1 if v["version"] > 1 else None)
+
+
+def can_undo():
+    store = _load()
+    return _previous(next(v for v in store["versions"] if v["version"] == store["current"])) is not None
+
+
+def undo():
+    """Go back to the version that was in use before the current one was kept.
+    Returns (version undone, version now in use). Raises LookupError at the original version."""
+    with _lock:
+        store = _load()
+        cur = next(v for v in store["versions"] if v["version"] == store["current"])
+        previous = _previous(cur)
+        if previous is None:
+            raise LookupError("These are the original stroke rules: there is nothing to undo.")
+        store["current"] = previous
+        _save(store)
+    return cur["version"], previous
