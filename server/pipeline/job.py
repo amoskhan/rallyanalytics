@@ -13,11 +13,10 @@ import uuid
 import cv2
 import numpy as np
 
-from . import analysis, players as players_mod, shuttle, view as view_mod
+from . import analysis, cutoffs as cutoffs_mod, paths, players as players_mod, shuttle, view as view_mod
 from .court import Court
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DATA = os.path.join(ROOT, "data", "videos")
+DATA = paths.VIDEOS
 os.makedirs(DATA, exist_ok=True)
 
 
@@ -207,7 +206,9 @@ def _analyse(vid):
     # Racket hand per player slot (0 near1, 1 near2, 2 far1, 3 far2), set by the user.
     hands_cfg = (read_json(vid, "review.json", {}) or {}).get("hands", {})
     hands = {i: hands_cfg[k] for i, k in enumerate(("near1", "near2", "far1", "far2")) if k in hands_cfg}
-    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode, vw, hands, img_h=meta["h"])
+    cut_version, cut = cutoffs_mod.current()
+    rallies, candidates, params = analysis.find_rallies(sh, kept, court, fps, mode, vw, hands, img_h=meta["h"], cutoffs=cut)
+    params["stroke_cutoffs_version"] = cut_version
     done(S3)
 
     write_json(vid, "players.json", {str(f): [[p["id"], 0 if p["side"] == "near" else 1, *p["box"],

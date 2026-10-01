@@ -226,7 +226,7 @@ def _bridge_top_exits(segs, x, y, cuts, wide, fps, img_h, max_gap_s=3.0, edge_fr
     return [tuple(v) for v in out], bridged
 
 
-def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None, img_h=None):
+def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None, img_h=None, cutoffs=None):
     v, x, y = sh["v"], sh["x"], sh["y"]
     n = len(v)
     wide = view["wide"] if view is not None else np.ones(n, bool)
@@ -274,14 +274,14 @@ def find_rallies(sh, players, court: Court, fps, mode, view=None, hands=None, im
         joined = s - vs < int(0.5 * fps)
         after = e + 1
         cut_end = after < n and (after in cuts or not wide[min(n - 1, after + 2)] or any(c in cuts for c in range(after, after + 3)))
-        rallies.append(_analyse_rally(s, e, sh, players, court, fps, mode, params, joined, cut_end, hands or {}))
+        rallies.append(_analyse_rally(s, e, sh, players, court, fps, mode, params, joined, cut_end, hands or {}, cutoffs))
 
     for i, r in enumerate(rallies):
         r["i"] = i
     return rallies, candidates, params
 
 
-def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cut_end=False, hands=None):
+def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cut_end=False, hands=None, cutoffs=None):
     hands = hands or {}
     v, x, y = sh["v"], sh["x"], sh["y"]
     court_h = params["court_height_px"]
@@ -442,21 +442,10 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
                "in": is_in, "settled": bool(settled), "plausible": bool(plausible)}
 
     shots = _shot_metrics(hits, landing, xs, ys, s, fps, court, court_h)
-    prev = None
-    for k, (sm, h) in enumerate(zip(shots, hits)):
-        nxt = hits[k + 1]["court"] if k + 1 < len(hits) else landing["court"]
-        # The receiver's front foot: only meaningful if the next contact is by the other side
-        # (after an unseen shot the next contact is the hitter's own side).
-        nh = hits[k + 1] if k + 1 < len(hits) else None
-        nxt_depth = nh.get("front_depth") if nh and nh["side"] != h["side"] else None
-        if nh and nh["side"] == h["side"]:
-            nxt = None
-        stroke, why = strokes_mod.classify(sm, h, nxt, prev, h["serve"], nxt_depth)
-        sm["stroke"], sm["stroke_why"] = stroke, why
-        sm["contact"] = strokes_mod.height_band(h.get("contact_h"))
-        fz, tz = strokes_mod.zones_for(h, nxt, nxt_depth)
-        sm["from_zone"], sm["to_zone"] = fz, tz
-        prev = stroke
+    # Strokes come from the saved fields alone, the same way Re-check strokes redoes them later.
+    for sm, st in zip(shots, strokes_mod.strokes_for_rally({"hits": hits, "shot_metrics": shots, "landing": landing}, cutoffs)):
+        sm["stroke"], sm["stroke_why"], sm["contact"] = st["stroke"], st["why"], st["contact"]
+        sm["from_zone"], sm["to_zone"] = st["from_zone"], st["to_zone"]
     speed = np.hypot(np.gradient(xs), np.gradient(ys)) * fps          # px/s along the image track
     step = 1
     return {

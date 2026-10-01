@@ -1,4 +1,4 @@
-"""Rule-based stroke classification using the ShuttleSet taxonomy (18 types).
+﻿"""Rule-based stroke classification using the ShuttleSet taxonomy (18 types).
 
 ShuttleSet (Wang et al., KDD 2023) labels BWF singles broadcasts with 18 shot types,
 so using the same names keeps our labels comparable and lets a model be trained on
@@ -10,7 +10,7 @@ it later. Each shot is classified from what the pipeline measures:
 - context: first shot = serve; what the previous shot was
 
 Every decision comes with a plain-English reason. Court zones by distance from the
-net (each half is 6.70 m; the short service line is 1.98 m out): front < 2.5 m,
+net (each half is 6.70 m; the short service line is 1.98 m out): by default front < 2.5 m,
 mid 2.5-4.3 m, rear > 4.3 m.
 """
 from .court import NET_Y
@@ -23,16 +23,43 @@ STROKES = [  # ShuttleSet's 18 types, in the dataset's order and wording
 ATTACKS = ("smash", "wrist smash", "rush")
 NET_ARRIVALS = ("net shot", "return net", "cross-court net shot", "drop", "passive drop")
 
-FRONT, REAR = 2.5, 4.3          # metres from the net
-OVERHEAD, UNDERARM = 0.95, 0.3  # racket-wrist height: 0 = hips, 1 = nose
-SMASH_KMH, WRIST_SMASH_KMH = 55, 38
+# The cut-offs the rules depend on. Improvements tune these from Checked rallies, so they're
+# passed in rather than fixed; the current set lives in the cut-off store (cutoffs.py).
+DEFAULT_CUTOFFS = {
+    "front_m": 2.5, "rear_m": 4.3,          # metres from the net
+    "overhead": 0.95, "underarm": 0.3,      # racket-wrist height: 0 = hips, 1 = nose
+    "smash_kmh": 55, "wrist_smash_kmh": 38,
+}
 
 # Older labels (before the ShuttleSet taxonomy) -> new names, for saved corrections.
 LEGACY = {"short serve": "short service", "long serve": "long service", "lift": "lob",
           "block": "return net", "net kill": "rush"}
 
 
-def zones_for(hit, nxt_court, nxt_depth=None):
+def strokes_for_rally(rally, cutoffs=None):
+    """Every Shot's Stroke for a Rally, worked out from its saved Contacts, Shot measurements
+    and landing alone, so it can be re-run on a saved result without the video.
+    Returns one {stroke, why, contact, from_zone, to_zone} per Shot."""
+    c = {**DEFAULT_CUTOFFS, **(cutoffs or {})}
+    hits, landing = rally["hits"], (rally.get("landing") or {}).get("court")
+    out, prev = [], None
+    for k, (sm, h) in enumerate(zip(rally["shot_metrics"], hits)):
+        nh = hits[k + 1] if k + 1 < len(hits) else None
+        nxt = nh["court"] if nh else landing
+        # The receiver's front foot: only meaningful if the next contact is by the other side
+        # (after an unseen shot the next contact is the hitter's own side).
+        nxt_depth = nh.get("front_depth") if nh and nh["side"] != h["side"] else None
+        if nh and nh["side"] == h["side"]:
+            nxt = None
+        stroke, why = classify(sm, h, nxt, prev, h["serve"], nxt_depth, c)
+        fz, tz = zones_for(h, nxt, nxt_depth, c)
+        out.append({"stroke": stroke, "why": why, "contact": height_band(h.get("contact_h"), c),
+                    "from_zone": fz, "to_zone": tz})
+        prev = stroke
+    return out
+
+
+def zones_for(hit, nxt_court, nxt_depth=None, cutoffs=DEFAULT_CUTOFFS):
     """Court zone the shot was played from and went to.
 
     "Front" for the hitter is judged by the front foot (closest ankle to the net): in a
@@ -41,15 +68,15 @@ def zones_for(hit, nxt_court, nxt_depth=None):
     Where the shot went uses the receiver's average foot position."""
     mean_d = abs(hit["court"][1] - NET_Y) if hit.get("court") else None
     fd = hit.get("front_depth")
-    zf = "front" if fd is not None and fd < FRONT else zone(mean_d)
-    zt = zone(abs(nxt_court[1] - NET_Y)) if nxt_court else None
+    zf = "front" if fd is not None and fd < cutoffs["front_m"] else zone(mean_d, cutoffs)
+    zt = zone(abs(nxt_court[1] - NET_Y), cutoffs) if nxt_court else None
     return zf, zt
 
 
-def zone(depth):
+def zone(depth, cutoffs=DEFAULT_CUTOFFS):
     if depth is None:
         return None
-    return "front" if depth < FRONT else "rear" if depth > REAR else "mid"
+    return "front" if depth < cutoffs["front_m"] else "rear" if depth > cutoffs["rear_m"] else "mid"
 
 
 def wrist_height(player, hand=None):
@@ -83,17 +110,18 @@ def wrist_height(player, hand=None):
     return round((hip_y - min(wrists)) / (hip_y - head_y), 2)
 
 
-def height_band(h):
+def height_band(h, cutoffs=DEFAULT_CUTOFFS):
     if h is None:
         return None
-    return "overhead" if h >= OVERHEAD else "underarm" if h < UNDERARM else "side"
+    return "overhead" if h >= cutoffs["overhead"] else "underarm" if h < cutoffs["underarm"] else "side"
 
 
-def classify(shot, hit, nxt_court, prev_stroke, is_serve, nxt_depth=None):
+def classify(shot, hit, nxt_court, prev_stroke, is_serve, nxt_depth=None, cutoffs=DEFAULT_CUTOFFS):
     """Returns (stroke, reason). shot = shot_metrics entry, hit = hit record."""
-    zf, zt = zones_for(hit, nxt_court, nxt_depth)
+    zf, zt = zones_for(hit, nxt_court, nxt_depth, cutoffs)
     h = hit.get("contact_h")
-    band = height_band(h)
+    band = height_band(h, cutoffs)
+    smash_kmh, wrist_smash_kmh = cutoffs["smash_kmh"], cutoffs["wrist_smash_kmh"]
     t = shot["flight_s"]
     kmh = shot.get("avg_speed_kmh") or 0
     arc = shot.get("arc_pct") or 0
@@ -116,9 +144,9 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve, nxt_depth=None):
 
     # --- fast shots from above the head come first: a smash taken near the net is still a smash.
     if band == "overhead" and not answering_net:
-        if kmh >= SMASH_KMH or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
+        if kmh >= smash_kmh or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
             return why("smash")
-        if kmh >= WRIST_SMASH_KMH and t < 0.8 and zf != "rear":
+        if kmh >= wrist_smash_kmh and t < 0.8 and zf != "rear":
             return why("wrist smash")
 
     # --- a slow shot that pulls the opponent right up to the net is a net shot,
@@ -137,9 +165,9 @@ def classify(shot, hit, nxt_court, prev_stroke, is_serve, nxt_depth=None):
 
     # --- overhead: clear, drop, passive drop, smash, wrist smash (rush at the net)
     if band == "overhead":
-        if kmh >= SMASH_KMH or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
+        if kmh >= smash_kmh or (t < 0.55 and (shot.get("distance_m") or 0) > 5):
             return why("smash")
-        if kmh >= WRIST_SMASH_KMH and t < 0.8 and zf != "rear":
+        if kmh >= wrist_smash_kmh and t < 0.8 and zf != "rear":
             return why("wrist smash")
         if t >= 0.95 and zt != "front":
             return why("clear")
