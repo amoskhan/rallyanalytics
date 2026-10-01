@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from .pipeline import job, labels, shuttle
+from .pipeline import improve, job, labels, shuttle
 
 app = FastAPI(title="Rally Analytics")
 
@@ -38,6 +38,32 @@ def health():
 def labelling():
     """Checked rallies and Shots in the teaching and test sets, across all Videos."""
     return labels.summary()
+
+
+@app.post("/api/improvement")
+def run_improvement():
+    """Tune the stroke rules on the teaching set and score them on the test set. The result
+    waits until kept or discarded."""
+    return improve.run()
+
+
+@app.get("/api/improvement")
+def pending_improvement():
+    return improve.pending()
+
+
+@app.post("/api/improvement/keep")
+def keep_improvement():
+    try:
+        return {"version": improve.keep()}
+    except (LookupError, ValueError) as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/improvement/discard")
+def discard_improvement():
+    improve.discard()
+    return {"ok": True}
 
 
 @app.get("/api/videos")

@@ -868,7 +868,42 @@ function labellingLine(){
 }
 async function refreshLabelling(){
   const mine=R;   // the video open when this started; ignore the answer if another one is open by then
-  try{const L=await api('/labelling');if(R!==mine)return;R.labelling=L;const el=$('#labSum');if(el)el.innerHTML=labellingLine()}catch(e){}
+  try{const [L,P]=await Promise.all([api('/labelling'),R.improvement===undefined?api('/improvement'):Promise.resolve(R.improvement)]);if(R!==mine)return;
+    R.labelling=L;R.improvement=P;const el=$('#labSum');if(el)el.innerHTML=labellingLine();renderImprovement()}catch(e){}
+}
+
+// Run improvement: tune the stroke rules on the teaching set, score them on the test set, then
+// the Labeller keeps or discards the result. Nothing changes until Keep.
+const CUTOFF_NAMES={front_m:'Front court ends (m from the net)',rear_m:'Rear court starts (m from the net)',overhead:'Overhead from wrist height',
+  underarm:'Underarm below wrist height',smash_kmh:'Smash from (km/h)',wrist_smash_kmh:'Wrist smash from (km/h)'};
+const asPct=v=>Math.round(v*100)+'%';
+function improvementHtml(){
+  const P=R.improvement;
+  const run='<button class="btn" id="runImprove" title="Tune the stroke rules on the teaching set and score them on the test set. Nothing changes until you press Keep.">Run improvement</button>';
+  if(!P) return run;
+  if(P.status==='not_enough') return `${run}<p class="small" style="margin:6px 0 0">Not enough checked rallies yet: the test set has <b>${P.test_shots}</b> checked shots and needs at least ${P.needed}${P.teaching_shots?'':', and the teaching set has none'}. Keep checking rallies.</p>`;
+  const a=P.accuracy, up=a.after>a.before, same=a.after===a.before;
+  const strokes=Object.entries(P.strokes).sort((x,y)=>y[1].shots-x[1].shots);
+  const cut=Object.entries(P.cutoffs);
+  return `<div style="border:1px solid var(--line,#ccc);border-radius:10px;padding:10px 12px">
+    <div class="row" style="justify-content:space-between;align-items:center"><b>Improvement result</b><span class="small muted">${P.teaching_shots} teaching shots · ${P.test_shots} test shots</span></div>
+    <p style="margin:6px 0">Stroke accuracy on the test set: <b>${asPct(a.before)} → ${asPct(a.after)}</b> ${same?'(no change)':up?'(better)':'(worse)'}</p>
+    ${P.warning?`<p style="margin:6px 0;color:#b3261e"><b>⚠ ${esc(P.warning)}</b> Think twice before keeping this.</p>`:''}
+    ${cut.length?`<p class="small" style="margin:6px 0 2px"><b>Rules that would change</b></p><ul class="small" style="margin:0 0 6px;padding-left:18px">${cut.map(([k,v])=>`<li>${esc(CUTOFF_NAMES[k]||k)}: ${v.before} → ${v.after}</li>`).join('')}</ul>`:'<p class="small muted" style="margin:6px 0">No rule changes: the teaching set gives no reason to move any of them.</p>'}
+    ${P.mixups.length?`<p class="small" style="margin:6px 0 2px"><b>Most common mix-ups</b> (test set, before → after)</p><ul class="small" style="margin:0 0 6px;padding-left:18px">${P.mixups.map(m=>`<li>${esc(cap1(m.label))} called ${esc(m.called)}: ${m.before} → ${m.after}</li>`).join('')}</ul>`:''}
+    <div class="tbl-wrap" style="max-height:220px;overflow:auto"><table class="t"><thead><tr><th>Stroke</th><th title="Checked test shots of this stroke">Shots</th><th>Before</th><th>After</th></tr></thead><tbody>
+      ${strokes.map(([st,v])=>`<tr><td><span class="sdot" style="background:${STROKE_COL[st]||'#999'}"></span>${esc(cap1(st))}</td><td class="num">${v.shots}${v.shots<8?' <span class="muted" title="Too few shots to trust a change">·</span>':''}</td><td class="num">${asPct(v.before)}</td><td class="num">${asPct(v.after)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="row" style="margin-top:8px"><button class="btn primary" id="keepImprove">Keep</button><button class="btn" id="discardImprove">Discard</button>${run}</div></div>`;
+}
+function renderImprovement(){
+  const el=$('#improvePanel'); if(!el) return;
+  el.innerHTML=improvementHtml();
+  const b=(id,f)=>{const x=$('#'+id);if(x)x.onclick=f};
+  b('runImprove',async()=>{$('#runImprove').disabled=true;$('#runImprove').textContent='Running…';
+    try{R.improvement=await api('/improvement',{method:'POST'})}catch(e){toast(e.message)}renderImprovement()});
+  b('keepImprove',async()=>{try{const r=await api('/improvement/keep',{method:'POST'});R.improvement=null;renderImprovement();
+    toast(`Kept: stroke rules version ${r.version}. New analyses use it; press Re-check strokes to update older videos.`)}catch(e){toast(e.message)}});
+  b('discardImprove',async()=>{try{await api('/improvement/discard',{method:'POST'});R.improvement=null;renderImprovement();toast('Discarded. The stroke rules are unchanged.')}catch(e){toast(e.message)}});
 }
 function renderShotTable(r){
   const sm=r.shot_metrics, mx=Math.max(1,...sm.map(s=>s.avg_speed_kmh||0),...sm.map(s=>s.peak_speed_kmh||0));
@@ -877,6 +912,7 @@ function renderShotTable(r){
   $('#shotPanel').innerHTML=`<div class="row" style="justify-content:space-between;align-items:center"><h3 class="sec" style="margin:0">Shot by shot · Rally ${r.i+1}</h3>
     <button class="btn${done?' primary':''}" id="checkRally" aria-pressed="${done}" title="Confirm every stroke in this rally is right (or Unknown). Only checked rallies teach the app.">${done?'✓ Rally checked':'Rally checked'}</button></div>
     <p class="small muted" id="labSum" style="margin:4px 0 8px">${labellingLine()}</p>
+    <div id="improvePanel" style="margin:0 0 10px">${improvementHtml()}</div>
     <div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="t" id="shotTbl"><thead><tr><th>#</th><th>Time</th><th>Player</th><th title="Pick the right stroke if the guess is wrong">Stroke</th><th title="Contact height: overhead, side or underarm">Contact</th><th title="Court zone hit from → zone it went to">From → to</th><th title="Time until the next contact">Flight</th><th title="Court distance from hitter to next contact">Dist.</th><th title="Distance ÷ flight time">Avg km/h</th><th title="Top speed in the first 0.2 s, estimated from the picture">Peak km/h*</th><th title="How far the path bows above a straight line, % of court height in the picture">Arc</th><th>Direction</th><th title="Hitter's wrist to shuttle at contact">Hand px</th><th title="Velocity snap at contact (court heights per second)">Snap</th><th title="Hand distance as a fraction of the player's height">Hand ×h</th></tr></thead>
     <tbody>${sm.map((s,k)=>{const h=r.hits[k];return `<tr data-k="${k}" data-seekf="${h.f}"><td>${k+1}${h.serve?' <span class="pill">serve</span>':''}</td><td class="num">${fmtT(h.f/R.res.meta.fps)}</td>
       <td><span class="${h.side==='near'?'ca':'cb'}">${h.player!=null?slotName(h.player):(h.side==='near'?'Near':'Far')+' ?'}</span></td>
@@ -894,6 +930,7 @@ function renderShotTable(r){
     try{if(done){await api('/videos/'+S.vid+'/rallies/'+r.i+'/checked',{method:'DELETE'});delete R.checked[r.i];toast('Rally unchecked')}
       else{await flushStrokes();const c=await api('/videos/'+S.vid+'/rallies/'+r.i+'/checked',{method:'PUT'});R.set=c.set;delete c.set;R.checked[r.i]=c;toast('Rally checked')}
       renderList();renderShotTable(r);refreshLabelling()}catch(e){toast('Could not save: '+e.message)}};
+  renderImprovement();
   $('#shotTbl').onclick=e=>{if(e.target.closest('select'))return;const tr=e.target.closest('tr[data-seekf]');if(tr){R.vid.currentTime=+tr.dataset.seekf/R.res.meta.fps-0.2}};
 }
 

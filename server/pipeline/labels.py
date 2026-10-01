@@ -86,21 +86,39 @@ def clear(vid):
             job.write_json(vid, "review.json", review)
 
 
-def summary():
-    """Checked rallies and Shots in each set, across every Video. Unknown Shots don't count:
-    they're left out of teaching and scoring."""
-    out = {name: {"videos": 0, "rallies": 0, "shots": 0} for name in ("teaching", "test")}
+def checked_rallies():
+    """Every Checked rally across all Videos, as (vid, set, rally, labels): labels maps each
+    Shot's position in the Rally to its confirmed Stroke, leaving out Unknown Shots. Rallies
+    no longer in their Video's result are skipped."""
+    out = []
     for vid in os.listdir(job.DATA):
         try:
             with job.review_lock(vid):
                 review = job.read_json(vid, "review.json", {}) or {}
-        except ValueError:   # a damaged review.json: leave that Video out rather than fail
+            if not review.get("checked") or review.get("set") not in ("teaching", "test"):
+                continue
+            result = job.read_json(vid, "result.json") or {}
+        except ValueError:   # a damaged file: leave that Video out rather than fail
             continue
-        checked = review.get("checked", {})
-        if not checked or review.get("set") not in out:
-            continue
-        counts = out[review["set"]]
-        counts["videos"] += 1
-        counts["rallies"] += len(checked)
-        counts["shots"] += sum(st != "unknown" for entry in checked.values() for st in entry["strokes"].values())
+        by_i = {r["i"]: r for r in result.get("rallies", [])}
+        for i, entry in review["checked"].items():
+            rally = by_i.get(int(i))
+            if rally is None:
+                continue
+            labels = {k: entry["strokes"].get(key, "unknown") for k, key in enumerate(_shot_keys(rally))}
+            out.append((vid, review["set"], rally, {k: st for k, st in labels.items() if st != "unknown"}))
+    return out
+
+
+def summary():
+    """Checked rallies and Shots in each set, across every Video. Unknown Shots don't count:
+    they're left out of teaching and scoring."""
+    out = {name: {"videos": 0, "rallies": 0, "shots": 0} for name in ("teaching", "test")}
+    videos = {name: set() for name in out}
+    for vid, which, _, labels in checked_rallies():
+        videos[which].add(vid)
+        out[which]["rallies"] += 1
+        out[which]["shots"] += len(labels)
+    for name in out:
+        out[name]["videos"] = len(videos[name])
     return out

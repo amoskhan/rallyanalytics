@@ -13,7 +13,7 @@ import uuid
 import cv2
 import numpy as np
 
-from . import analysis, cutoffs as cutoffs_mod, paths, players as players_mod, shuttle, strokes as strokes_mod, view as view_mod
+from . import analysis, cutoffs as cutoffs_mod, paths, players as players_mod, shuttle, storage, strokes as strokes_mod, view as view_mod
 from .court import Court
 
 DATA = paths.VIDEOS
@@ -32,29 +32,8 @@ def read_json(vid, name, default=None):
         return json.load(fh)
 
 
-def _np_default(o):
-    if isinstance(o, np.generic):
-        return o.item()
-    if isinstance(o, np.ndarray):
-        return o.tolist()
-    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
-
-
 def write_json(vid, name, obj):
-    p = os.path.join(vdir(vid), name)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, separators=(",", ":"), default=_np_default)
-    # On Windows the swap fails while another thread has the old file open for reading; that
-    # read takes milliseconds, so try again briefly rather than lose the save.
-    for attempt in range(20):
-        try:
-            os.replace(tmp, p)
-            return
-        except PermissionError:
-            if attempt == 19:
-                raise
-            time.sleep(0.025)
+    storage.save_json(os.path.join(vdir(vid), name), obj, separators=(",", ":"))
 
 
 _review_locks = {}
