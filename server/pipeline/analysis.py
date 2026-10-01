@@ -443,9 +443,7 @@ def _analyse_rally(s, e, sh, players, court, fps, mode, params, joined=False, cu
 
     shots = _shot_metrics(hits, landing, xs, ys, s, fps, court, court_h)
     # Strokes come from the saved fields alone, the same way Re-check strokes redoes them later.
-    for sm, st in zip(shots, strokes_mod.strokes_for_rally({"hits": hits, "shot_metrics": shots, "landing": landing}, cutoffs)):
-        sm["stroke"], sm["stroke_why"], sm["contact"] = st["stroke"], st["why"], st["contact"]
-        sm["from_zone"], sm["to_zone"] = st["from_zone"], st["to_zone"]
+    strokes_mod.apply_strokes({"hits": hits, "shot_metrics": shots, "landing": landing}, cutoffs)
     speed = np.hypot(np.gradient(xs), np.gradient(ys)) * fps          # px/s along the image track
     step = 1
     return {

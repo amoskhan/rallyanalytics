@@ -560,7 +560,17 @@ function renderStrokeStats(r){
   const order=STROKES.concat(['unknown']).filter(st=>count[st]);
   const mx=Math.max(1,...order.flatMap(st=>cols.map(c=>count[st][c[0]]||0)));
   el.innerHTML=`<table class="t"><thead><tr><th>Stroke</th>${cols.map(c=>`<th style="color:${c[2]}">${c[1]}</th>`).join('')}</tr></thead><tbody>${order.map(st=>`<tr><td><span class="sdot" style="background:${STROKE_COL[st]}"></span>${cap1(st)}</td>${cols.map(c=>{const v=count[st][c[0]]||0;return `<td><div class="cell"><span class="bar" style="width:${Math.round(v/mx*48)}px;background:${c[2]}"></span>${v||''}</div></td>`}).join('')}</tr>`).join('')}</tbody></table>
-  <p class="small muted" style="margin:6px 0 0">Guessed from contact height, where each shot was hit from and went to, and its flight time. Correct any stroke in the shot table below the video; corrections fix this video's report. Press <b>Rally checked</b> once every stroke in a rally is right (or Unknown): checked rallies are what will teach the app to recognise strokes.</p>`;
+  <p class="small muted" style="margin:6px 0 0">Guessed from contact height, where each shot was hit from and went to, and its flight time. Correct any stroke in the shot table below the video; corrections fix this video's report. Press <b>Rally checked</b> once every stroke in a rally is right (or Unknown): checked rallies are what will teach the app to recognise strokes.</p>
+  <div class="row" style="margin-top:6px"><button class="btn" id="recheckStrokes" title="Work out this video's strokes again with the app's latest stroke rules. Your corrections and checked rallies stay as they are.">Re-check strokes</button>
+    <span class="small muted">Uses the latest stroke rules${R.res.pipeline?.analysis?.stroke_cutoffs_version?` (this video: version ${R.res.pipeline.analysis.stroke_cutoffs_version})`:''}. Your corrections are kept.</span></div>`;
+  $('#recheckStrokes').onclick=recheckStrokes;
+}
+async function recheckStrokes(){
+  $('#recheckStrokes').disabled=true;
+  try{const r=await api('/videos/'+S.vid+'/recheck-strokes',{method:'POST'});
+    toast(r.changed?`${r.changed} stroke${r.changed===1?'':'s'} updated (stroke rules version ${r.cutoffs_version})`:`Already up to date (stroke rules version ${r.cutoffs_version})`);
+    if(r.changed)openVideo(S.vid);else $('#recheckStrokes').disabled=false}
+  catch(e){toast(e.message);$('#recheckStrokes').disabled=false}
 }
 
 // Court map beside the video. Each shot appears as it's hit: an arrow from where it was

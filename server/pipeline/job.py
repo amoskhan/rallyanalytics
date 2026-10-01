@@ -13,7 +13,7 @@ import uuid
 import cv2
 import numpy as np
 
-from . import analysis, cutoffs as cutoffs_mod, paths, players as players_mod, shuttle, view as view_mod
+from . import analysis, cutoffs as cutoffs_mod, paths, players as players_mod, shuttle, strokes as strokes_mod, view as view_mod
 from .court import Court
 
 DATA = paths.VIDEOS
@@ -59,6 +59,16 @@ def write_json(vid, name, obj):
 
 _review_locks = {}
 _review_locks_guard = threading.Lock()
+
+
+_result_locks = {}
+
+
+def result_lock(vid):
+    """Held while result.json is rewritten, so Re-check strokes and a finishing analysis
+    can't overwrite each other."""
+    with _review_locks_guard:
+        return _result_locks.setdefault(vid, threading.Lock())
 
 
 def review_lock(vid):
@@ -260,6 +270,12 @@ def _analyse(vid):
                     "model": players_mod.DEFAULT_MODEL},
         "analysis": params,
     }
+    with result_lock(vid):
+        _write_result(vid, meta, mode, court, sh, arr, counts, candidates, pipeline, vw, rallies)
+    set_status(vid, state="done", stage="Analysis complete", progress=1)
+
+
+def _write_result(vid, meta, mode, court, sh, arr, counts, candidates, pipeline, vw, rallies):
     write_json(vid, "result.json", {
         "version": 2, "meta": meta, "mode": mode, "court": court.to_json(),
         "shuttle": {"x": arr(sh["x"], sh["v"]), "y": arr(sh["y"], sh["v"]),
@@ -269,7 +285,30 @@ def _analyse(vid):
         "view": {"score": [round(float(a), 2) for a in vw["score"]], "cuts": [int(c) for c in vw["cuts"]]},
         "rallies": rallies, "summary": analysis.summarise(rallies),
     })
-    set_status(vid, state="done", stage="Analysis complete", progress=1)
+
+
+def recheck_strokes(vid):
+    """Re-work out the Strokes in a finished analysis with the current cut-offs, from the saved
+    result alone. Checked rallies are skipped, so they keep showing what the Labeller confirmed,
+    and Corrections (kept in the review) are never touched. Returns (number of Strokes the
+    uploader will see change, cut-off version used); a corrected Shot's Stroke doesn't show, so
+    it isn't counted. Raises ValueError for a result from an older analysis that didn't save
+    what Strokes are worked out from."""
+    version, cut = cutoffs_mod.current()
+    review = read_json(vid, "review.json", {}) or {}
+    corrections, checked = review.get("strokes", {}), review.get("checked", {})
+    with result_lock(vid):
+        result = read_json(vid, "result.json")
+        if any("hits" not in r or "shot_metrics" not in r for r in result["rallies"]):
+            raise ValueError("This video was analysed by an older version. Re-run the analysis first.")
+        changed = 0
+        for r in result["rallies"]:
+            if str(r["i"]) in checked:
+                continue
+            changed += sum(f"{r['i']}:{r['hits'][k]['f']}" not in corrections for k in strokes_mod.apply_strokes(r, cut))
+        result.setdefault("pipeline", {}).setdefault("analysis", {})["stroke_cutoffs_version"] = version
+        write_json(vid, "result.json", result)
+    return changed, version
 
 
 def _worker():

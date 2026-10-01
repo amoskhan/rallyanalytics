@@ -149,6 +149,21 @@ def players(vid: str):
     return FileResponse(p, media_type="application/json")
 
 
+@app.post("/api/videos/{vid}/recheck-strokes")
+def recheck_strokes(vid: str):
+    """Bring a Video's Strokes up to date with the current cut-offs, without re-analysing it."""
+    _need(vid)
+    if (job.read_json(vid, "status.json", {}) or {}).get("state") in ("converting", "queued", "analysing"):
+        raise HTTPException(409, "This video is being analysed. Re-check its strokes when that's finished.")
+    if not os.path.exists(os.path.join(job.vdir(vid), "result.json")):
+        raise HTTPException(404, "No result yet")
+    try:
+        changed, version = job.recheck_strokes(vid)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"changed": changed, "cutoffs_version": version}
+
+
 class ReviewIn(BaseModel):
     rallies: list[dict] | None = None
     names: dict[str, str] | None = None     # slot -> name: near1, near2, far1, far2

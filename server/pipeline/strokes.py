@@ -59,6 +59,18 @@ def strokes_for_rally(rally, cutoffs=None):
     return out
 
 
+def apply_strokes(rally, cutoffs=None):
+    """Write each Shot's Stroke, reason, contact height and zones into the Rally's saved Shot
+    measurements. Returns the positions of the Shots whose Stroke differs from before."""
+    changed = []
+    for k, (sm, st) in enumerate(zip(rally["shot_metrics"], strokes_for_rally(rally, cutoffs))):
+        if sm.get("stroke") is not None and sm["stroke"] != st["stroke"]:
+            changed.append(k)
+        sm["stroke"], sm["stroke_why"], sm["contact"] = st["stroke"], st["why"], st["contact"]
+        sm["from_zone"], sm["to_zone"] = st["from_zone"], st["to_zone"]
+    return changed
+
+
 def zones_for(hit, nxt_court, nxt_depth=None, cutoffs=DEFAULT_CUTOFFS):
     """Court zone the shot was played from and went to.
 
