@@ -34,6 +34,12 @@ def health():
             "tracknet_weights": shuttle.weights_present()}
 
 
+@app.get("/api/labelling")
+def labelling():
+    """Checked rallies and Shots in the teaching and test sets, across all Videos."""
+    return labels.summary()
+
+
 @app.get("/api/videos")
 def videos():
     return job.list_videos()
@@ -182,7 +188,7 @@ def check_rally(vid: str, i: int):
     entry = labels.check(vid, i)
     if entry is None:
         raise HTTPException(404, "No such rally")
-    return entry
+    return {**entry, "set": job.read_json(vid, "review.json", {}).get("set")}
 
 
 @app.delete("/api/videos/{vid}/rallies/{i}/checked")

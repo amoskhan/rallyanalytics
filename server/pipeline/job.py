@@ -45,7 +45,16 @@ def write_json(vid, name, obj):
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(obj, fh, separators=(",", ":"), default=_np_default)
-    os.replace(tmp, p)
+    # On Windows the swap fails while another thread has the old file open for reading; that
+    # read takes milliseconds, so try again briefly rather than lose the save.
+    for attempt in range(20):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.025)
 
 
 _review_locks = {}
