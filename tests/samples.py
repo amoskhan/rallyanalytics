@@ -53,14 +53,18 @@ def low_clear():
         strokes=["lob"])
 
 
-def save_video(data_dir, vid, rallies, name="sample.mp4"):
-    """Write a Video folder holding just what a finished analysis leaves behind (no video file)."""
+def save_video(data_dir, vid, rallies, review=None, name="sample.mp4"):
+    """Write a Video folder holding just what a finished analysis leaves behind (no video file),
+    plus the uploader's review (Corrections, names) when given."""
     d = os.path.join(data_dir, "videos", vid)
     os.makedirs(d, exist_ok=True)
     files = {"info.json": {"id": vid, "name": name, "created": time.time()},
              "status.json": {"state": "done", "stage": "Analysis complete", "progress": 1},
              "result.json": {"version": 2, "mode": "singles",
-                             "rallies": [{**r, "i": i} for i, r in enumerate(rallies)]}}
+                             "rallies": [{**r, "i": i} for i, r in enumerate(rallies)]},
+             "court.json": {"corners": [[0, 0], [100, 0], [100, 100], [0, 100]], "mode": "singles"}}
+    if review is not None:
+        files["review.json"] = review
     for fname, obj in files.items():
         with open(os.path.join(d, fname), "w", encoding="utf-8") as fh:
             json.dump(obj, fh)

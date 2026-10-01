@@ -48,6 +48,17 @@ def write_json(vid, name, obj):
     os.replace(tmp, p)
 
 
+_review_locks = {}
+_review_locks_guard = threading.Lock()
+
+
+def review_lock(vid):
+    """Held around every read-change-write of a Video's review.json. The API handlers run in
+    parallel threads, and a stroke save and a Rally checked click can land together."""
+    with _review_locks_guard:
+        return _review_locks.setdefault(vid, threading.Lock())
+
+
 def set_status(vid, **kw):
     st = read_json(vid, "status.json", {}) or {}
     st.update(kw, updated=time.time())

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from .pipeline import job, shuttle
+from .pipeline import job, labels, shuttle
 
 app = FastAPI(title="Rally Analytics")
 
@@ -88,24 +88,38 @@ class CourtIn(BaseModel):
     mode: str = "auto"
 
 
+def _refuse_if_checked(vid, clear_checked):
+    """Re-analysing can change a Video's Rallies, which would leave Checked rallies pointing at the
+    wrong Shots. So it's refused while there are any, unless the Labeller agrees to clear them.
+    The caller clears them once nothing else can stop the re-analysis."""
+    n = labels.count(vid)
+    if n and not clear_checked:
+        raise HTTPException(409, f"This video has {n} Checked {'rally' if n == 1 else 'rallies'}. "
+                                 "Re-analysing can change its rallies, so they would be unchecked.")
+
+
 @app.post("/api/videos/{vid}/analyse")
-def analyse(vid: str, body: CourtIn):
+def analyse(vid: str, body: CourtIn, clear_checked: bool = False):
     _need(vid)
+    _refuse_if_checked(vid, clear_checked)
     if len(body.corners) != 4:
         raise HTTPException(400, "Mark exactly 4 court corners")
     if not shuttle.weights_present():
         raise HTTPException(500, "TrackNetV3 weights are missing. Run setup.ps1 first.")
+    labels.clear(vid)
     job.queue_analysis(vid, body.corners, body.mode)
     return {"ok": True}
 
 
 @app.post("/api/videos/{vid}/retry")
-def retry(vid: str):
+def retry(vid: str, clear_checked: bool = False):
     _need(vid)
     st = job.read_json(vid, "status.json", {}) or {}
     if st.get("retry") == "prepare":
         job.JOBS.put(("prepare", vid))
     elif job.read_json(vid, "court.json"):
+        _refuse_if_checked(vid, clear_checked)
+        labels.clear(vid)
         c = job.read_json(vid, "court.json")
         job.queue_analysis(vid, c["corners"], c.get("mode", "auto"))
     return {"ok": True}
@@ -141,6 +155,12 @@ def save_review(vid: str, body: ReviewIn):
     """Stores the user's corrections (winner per rally) and player names next to the result.
     Only the fields sent are updated."""
     _need(vid)
+    with job.review_lock(vid):
+        _update_review(vid, body)
+    return {"ok": True}
+
+
+def _update_review(vid, body):
     cur = job.read_json(vid, "review.json", {}) or {}
     if body.rallies is not None:
         cur["rallies"] = body.rallies
@@ -149,8 +169,26 @@ def save_review(vid: str, body: ReviewIn):
     if body.hands is not None:
         cur["hands"] = {k: v for k, v in body.hands.items() if k in ("near1", "near2", "far1", "far2") and v in ("R", "L")}
     if body.strokes is not None:
+        old = cur.get("strokes", {})
         cur["strokes"] = {k: str(v)[:20] for k, v in body.strokes.items()}
+        labels.follow_corrections(vid, cur, old)
     job.write_json(vid, "review.json", cur)
+
+
+@app.put("/api/videos/{vid}/rallies/{i}/checked")
+def check_rally(vid: str, i: int):
+    """A Labeller confirms every Shot's Stroke in Rally i as the review shows it."""
+    _need(vid)
+    entry = labels.check(vid, i)
+    if entry is None:
+        raise HTTPException(404, "No such rally")
+    return entry
+
+
+@app.delete("/api/videos/{vid}/rallies/{i}/checked")
+def uncheck_rally(vid: str, i: int):
+    _need(vid)
+    labels.uncheck(vid, i)
     return {"ok": True}
 
 
